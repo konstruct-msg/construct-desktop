@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Construct Desktop",
+  "version": "0.1.0",
+  "identifier": "com.konstruct.construct-desktop",
+  "app": {
+    "windows": [
+      {
+        "title": "Construct",
+        "width": 900,
+        "height": 700
+      }
+    ]
+  },
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420"
+  },
+  "security": {
+    "csp": null
+  },
+  "bundle": {
+    "active": false
+  }
+}
+
