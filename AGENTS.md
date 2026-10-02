@@ -1,105 +1,71 @@
 # AGENTS.md — construct-desktop
 
-Context for AI agents working in this repository.
+Konstruct for **Linux and Windows**. macOS is covered by the `Construct Desktop` target in
+construct-messenger; this repository is not for it.
 
----
+Decision: `~/Code/construct-docs/decisions/desktop-is-the-tui-client-with-a-second-shell.md`. Read
+it before working here.
 
-## What is construct-desktop?
+## What this is
 
-Desktop client for Construct Messenger built as a Tauri 2 application with a Rust backend.
-The checked-in frontend is a minimal static HTML/JavaScript UI in `dist/` — no React/Vue/Svelte
-source tree is present in this repository right now.
-
-This app currently uses `construct-core` directly as a Rust crate (`features = ["desktop"]`)
-for crypto/session orchestration and `tonic` gRPC clients for server communication.
-
----
-
-## Architecture
+A Tauri 2 window whose whole content is a character grid. Ratatui draws the grid in Rust; xterm.js
+in the webview only paints the frames and sends input back. The program itself, meaning the
+account, keys, sessions, stream and storage, is `construct-client`, the crate in
+`construct-tui/crates/construct-client`. This repository adds only the window.
 
 ```
-dist/index.html            — current frontend (plain HTML/JS, no framework source checked in)
-src/main.rs                — Tauri bootstrap, command registration, shared engine state
-src/ui.rs                  — Tauri commands exposed to the frontend via `invoke(...)`
-src/engine.rs              — auth flow, construct-core integration, chat state, receive loop
-src/grpc.rs                — tonic clients for AuthService / KeyService / MessagingService
-src/storage.rs             — secure local persistence for tokens and state
-src/wire.rs                — encrypted wire payload encode/decode helpers
-src-tauri/tauri.conf.json  — Tauri app/window/build configuration
+src-tauri/src/main.rs    Tauri commands: attach / resize / key / text
+src-tauri/src/grid.rs    ratatui → ANSI frames → Channel; the size comes from the webview, not a tty
+src-tauri/src/keys.rs    DOM KeyboardEvent → crossterm KeyEvent (shortcuts by physical key)
+src-tauri/src/screen.rs  placeholder screen; replaced by the konstruct screens
+ui/                      index.html, main.js, style.css; vendored xterm.js, JetBrains Mono
 ```
 
-### Tauri boundary
+Until 2026-10-02 this repository held a different program: a Tauri app with an HTML interface
+and its own `engine.rs`, which re-decided what the core decides and stopped building when the
+core dropped its `desktop` feature. It was deleted, not migrated. Only the name remains.
 
-Frontend code should stay thin. The browser side calls Tauri commands in `ui.rs`, while
-networking, crypto, storage, and durable state stay in Rust.
+## Invariants
 
-### Frontend status
+- **The webview sees frames, never the client.** No `ClientEvent`, contact list, key or token
+  crosses the IPC boundary, only rendered text and input. A feature that seems to need the
+  webview to know something is built as a screen in Rust.
+- **No interface in JavaScript.** `ui/main.js` paints and forwards input. A panel, a dialog or a
+  list written in HTML would be a third interface, which the decision exists to prevent.
+- **No protocol here.** Anything the core or `construct-client` decides is asked of them. The
+  previous `engine.rs` is what this rule is about.
+- **Shortcuts go by the physical key.** On a Cyrillic layout the browser reports Ctrl+K as
+  Ctrl+л. `keys.rs` takes the letter from `KeyboardEvent.code` when a modifier is held, and the
+  copy/paste checks in `main.js` do the same. Russian is the main audience's layout.
+- **The CSP stays strict** (`tauri.conf.json`): only local scripts, no remote origins, and no
+  plugin permissions beyond `core:default`.
+- **Vendored xterm.js is unmodified.** The versions are listed in `ui/vendor/xterm/VERSIONS`;
+  update it by the route described there.
 
-The current frontend is plain static HTML/JS served from `dist/`. If a framework is added later,
-document it here and keep command/API ownership on the Rust side.
-
----
-
-## Build & Run
+## Build & run
 
 ```bash
-cargo tauri dev                  # run desktop app in dev mode
-cargo tauri build                # build distributable app
-cargo build                      # build Rust backend only
-cargo test                       # run tests
+cargo run -p construct-desktop          # the window, without bundling
+cargo test --workspace
+npx @tauri-apps/cli@2 build             # deb/rpm/AppImage on Linux, nsis/msi on Windows
 ```
 
----
+`construct-tui` and `construct-core` must be checked out next to this repository; the client
+crate is a path dependency. The pre-push hook runs fmt and clippy (`-D warnings`).
 
-## Key conventions
+## Documentation & session notes
 
-- Tauri commands in `ui.rs` are the frontend/backend API surface — changing them is a breaking change for the UI
-- Keep `construct-core` usage inside `engine.rs` and supporting modules, not in UI-facing command handlers
-- Rust backend is the source of truth for auth, session, and message state
-- Keep frontend assets in `dist/` lightweight; do not duplicate protocol logic in JavaScript
+Docs live in `~/Code/construct-docs`, an Obsidian vault with flat domain folders. **The vault's
+`AGENTS.md` is authoritative** for structure and writing rules.
 
----
----
+After any session with architectural changes, design decisions, root-cause analysis or
+non-obvious choices:
 
-## Shared Construct Docs Workflow
-
-These instructions apply to GitHub Copilot, Codex, OpenCode, and similar coding agents.
-
-### Division of labour — read this first
-
-| Role | Tool | Responsibility |
-|------|------|----------------|
-| **Coding agent** (you) | Copilot / Codex | Write code + drop raw session notes into `wiki/sessions/` and `wiki/decisions/`. That is all. |
-| **Wiki pipeline** | `obsidian-llm-wiki-local` (olw) | Reads `raw/`, synthesizes concepts, creates/updates wiki articles, generates cross-links. |
-| **Developer** | Human + Obsidian | Reviews wiki draft articles, approves/rejects. Curates `raw/`. |
-
-**Your job is code.** olw handles article synthesis. Write plain-markdown session notes; let the pipeline do the rest.
-
-### Shared knowledge base
-
-- Vault: `/Users/maximeliseyev/Code/construct-docs`
-- `raw/` — source corpus. Do **not** rewrite or reorganize.
-- `wiki/` — canonical curated knowledge base. **Read** from here before architectural work.
-- `wiki/.drafts/` — **reserved for olw**. Never write here manually.
-- `wiki/sessions/` — where coding agents write session notes.
-- `wiki/decisions/` — where coding agents write long-lived decision records.
-
-### Where to save durable reasoning
-
-After any session involving architectural changes, design decisions, API changes, or non-obvious implementation choices:
-
-1. **Always** create or update `wiki/sessions/YYYY-MM-DD-<topic>.md`.
-2. **Always** fill in `# Why` — reasoning, alternatives considered, why rejected. Most important section.
-3. If the decision constrains future work, also create `wiki/decisions/<topic>.md`.
-4. Session notes: plain markdown, **no YAML frontmatter, no `[[wikilinks]]`** — olw adds those.
-
-Required note sections: `# Context`, `# What Changed`, `# Why`, `# Intended Outcome`, `# Decisions`, `# Open Questions`
-
-### Operational logging
-
-Append a one-line entry to `wiki/log.md` after writing a note.
-Format: `[YYYY-MM-DD HH:MM] note | <topic>`
-
+1. Write `sessions/YYYY-MM-DD-<topic>.md` (Context / What Changed / **Why** / Decisions / Open
+   Questions). `## Why` with rejected alternatives is mandatory.
+2. If it constrains future work, add or update `decisions/<slug>.md`.
+3. Patch the affected spec in the **same** session.
+4. Append one line to `~/Code/construct-docs/log.md`: `[YYYY-MM-DD HH:MM] note | <topic>`.
 
 ## Git workflow (branch + PR only)
 

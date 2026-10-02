@@ -1,0 +1,12 @@
+# Pinned toolchain. Must match construct-core/rust-toolchain.toml — this crate takes
+# construct-core by path, and construct-core takes construct-veil the same way, so all
+# three resolve as one dependency graph. Without a pin here the repo builds against
+# whatever the default toolchain happens to be (1.92 on this machine), and construct-core
+# declares `rust-version = "1.96"` — so the build fails before compiling a single line.
+#
+# When bumping: bump construct-core and construct-veil in the same change.
+
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
