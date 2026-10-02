@@ -1,0 +1,26 @@
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("fonts/JetBrainsMono-Regular.ttf") format("truetype");
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("fonts/JetBrainsMono-Bold.ttf") format("truetype");
+  font-weight: 700;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  /* Phosphor bg.window, so a resize never flashes white. */
+  background: #062038;
+}
+
+#grid {
+  position: absolute;
+  inset: 0;
+  padding: 6px;
+}
