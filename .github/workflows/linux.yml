@@ -48,7 +48,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
-            libdbus-1-dev pkg-config patchelf file rpm protobuf-compiler
+            libdbus-1-dev pkg-config patchelf file rpm
+
+      # Ubuntu's protoc (3.12) predates proto3 `optional`, which the protos use.
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: "28.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Rust toolchain
         working-directory: construct-desktop
