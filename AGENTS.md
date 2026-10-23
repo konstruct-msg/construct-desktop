@@ -12,29 +12,26 @@ The work plan, its stages and their gates, and the progress log are in the vault
 `~/Code/construct-docs/todo/218-desktop-linux-windows-plan.md`. Read it first. Then take the
 first stage that is not done, and add a line to its «Ход» when you finish.
 
-State on 2026-10-23:
+State on 2026-10-23 (evening):
 
-- The window, input and resizing work, but the screen inside is still a placeholder.
-- **The tree does not build** against the current `construct-core` (0.57). `construct-client` was
-  last built against core 0.30 (2026-10-02). The first error is the `PlatformBridge` import in
-  `construct-client/src/bridge.rs`, removed by core 0.54 (`31b3de5`, "remove the dead code").
-  More errors will follow it.
-- The client has never exchanged a message with iOS in both directions. What separates them is
-  listed in the task.
+- The window draws the real screens: `construct-screens` `App`, the same one the terminal shell
+  draws (stage 3 of the plan, first step).
+- `construct-client` builds against core 0.57 and talks sealed through the server (TUI↔TUI checked
+  both ways after restarts). The run with iOS is not done yet.
 
 ## Checkouts and who owns them
 
 This crate takes its dependencies by path, so the siblings must sit next to it:
-`~/Code/construct-tui` (it contains `construct-client`), `~/Code/construct-core`, and
-`~/Code/construct-veil`. All three use one toolchain, set in `rust-toolchain.toml`.
+`~/Code/construct-client` (the client layer and the screens), `~/Code/construct-core` and
+`~/Code/construct-protos`. All use one toolchain, set in `rust-toolchain.toml`.
 
 - Other agent sessions work in the `construct-core` and `construct-protos` working copies. Never
   switch their branches. Make changes there in a worktree, on a branch, through a PR. The owner
   merges PRs in `construct-core`.
-- `construct-tui` is where `construct-client` changes. Make those changes in `construct-tui` as
-  well, on their own branch and PR, and not as a copy in this repository.
+- `construct-client` (repository) is where the client layer and the screens change, on their own
+  branch and PR, never as a copy in this repository. `construct-tui` is only the terminal shell.
 - To build this repository from a worktree, place symlinks to the siblings next to it, so that
-  `../../construct-tui` resolves.
+  `../../construct-client` resolves.
 - Turn the hooks on once per clone with `git config core.hooksPath .githooks`. The commit-msg hook
   strips `Co-authored-by` lines; that is intended.
 
@@ -58,14 +55,15 @@ This crate takes its dependencies by path, so the siblings must sit next to it:
 
 A Tauri 2 window whose whole content is a character grid. Ratatui draws the grid in Rust; xterm.js
 in the webview only paints the frames and sends input back. The program itself, meaning the
-account, keys, sessions, stream and storage, is `construct-client`, the crate in
-`construct-tui/crates/construct-client`. This repository adds only the window.
+account, keys, sessions, stream and storage, is `construct-client`, and what is shown is
+`construct-screens`; both live in the construct-client repository. This repository adds only the
+window.
 
 ```
 src-tauri/src/main.rs    Tauri commands: attach / resize / key / text
-src-tauri/src/grid.rs    ratatui → ANSI frames → Channel; the size comes from the webview, not a tty
+src-tauri/src/grid.rs    ratatui → ANSI frames → Channel; runs construct-screens' App; the size
+                         comes from the webview, not a tty
 src-tauri/src/keys.rs    DOM KeyboardEvent → crossterm KeyEvent (shortcuts by physical key)
-src-tauri/src/screen.rs  placeholder screen; replaced by the konstruct screens
 ui/                      index.html, main.js, style.css; vendored xterm.js, JetBrains Mono
 ```
 
@@ -98,8 +96,8 @@ cargo test --workspace
 npx @tauri-apps/cli@2 build             # deb/rpm/AppImage on Linux, nsis/msi on Windows
 ```
 
-`construct-tui` and `construct-core` must be checked out next to this repository; the client
-crate is a path dependency. The pre-push hook runs fmt and clippy (`-D warnings`).
+`construct-client`, `construct-core` and `construct-protos` must be checked out next to this
+repository; the client and screens crates are path dependencies. The pre-push hook runs fmt and clippy (`-D warnings`).
 
 `cargo run` works on macOS too, which is enough for development. The installers come only from
 the target system: deb, rpm and AppImage from Linux, nsis and msi from Windows. Until CI builds

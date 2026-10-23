@@ -9,7 +9,6 @@
 
 mod grid;
 mod keys;
-mod screen;
 
 use tauri::{State, ipc::Channel};
 use tokio::sync::mpsc;
@@ -57,12 +56,25 @@ fn main() {
         .init();
 
     let (inbox, inputs) = mpsc::unbounded_channel();
-    let screen = screen::Screen::new(&construct_client::stored_session_state());
+    let config = construct_client::config::load_config().unwrap_or_default();
 
     tauri::Builder::default()
         .manage(GridInbox(inbox))
-        .setup(|_| {
-            tauri::async_runtime::spawn(grid::run(inputs, screen));
+        .setup(move |app| {
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // Made here: the app starts the client task, which needs the runtime.
+                let screens = construct_screens::App::new(construct_screens::AppConfig {
+                    server_url: config.server,
+                    transport: config.transport,
+                    no_encrypt: false,
+                    pq_active: cfg!(feature = "post-quantum"),
+                    theme: construct_screens::load_theme(),
+                });
+                grid::run(inputs, screens).await;
+                // The person quit from the screens (Ctrl+C, or q where it means quit).
+                handle.exit(0);
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![attach, resize, key, text])

@@ -11,15 +11,18 @@ name = "konstruct-desktop"
 path = "src/main.rs"
 
 [features]
-post-quantum = ["construct-client/post-quantum"]
+default = ["post-quantum"]
+post-quantum = ["construct-client/post-quantum", "construct-screens/post-quantum"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# Everything the program is, apart from how it is shown. Lives in construct-tui until the screens
-# move into a crate both shells share (decisions/desktop-is-the-tui-client-with-a-second-shell.md).
-construct-client = { path = "../../construct-tui/crates/construct-client" }
+# Everything the program is, and the screens it shows, from the construct-client repository
+# checked out next to this one (decisions/desktop-is-the-tui-client-with-a-second-shell.md).
+# The same screens the terminal shell draws; this crate adds only the window.
+construct-client = { path = "../../construct-client/crates/construct-client" }
+construct-screens = { path = "../../construct-client/crates/construct-screens" }
 
 tauri = { version = "2", features = [] }
 ratatui = "0.30"

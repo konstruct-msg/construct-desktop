@@ -16,7 +16,7 @@ use ratatui::{
 use tauri::ipc::Channel;
 use tokio::sync::mpsc;
 
-use crate::screen::Screen;
+use construct_screens::App;
 
 /// What the webview sends the grid.
 pub enum Input {
@@ -148,29 +148,33 @@ fn attach(cols: u16, rows: u16, frames: Channel<String>) -> io::Result<Grid> {
     Ok(grid)
 }
 
-/// Owns the grid and the screen; redraws after every input.
-pub async fn run(mut inputs: mpsc::UnboundedReceiver<Input>, mut screen: Screen) {
+/// Owns the grid and the app; redraws after every input and every client event. Returns when
+/// the person quits.
+pub async fn run(mut inputs: mpsc::UnboundedReceiver<Input>, mut app: App) {
+    app.start();
     let mut grid: Option<Grid> = None;
-    while let Some(input) = inputs.recv().await {
-        match input {
-            Input::Attach { cols, rows, frames } => match attach(cols, rows, frames) {
-                Ok(g) => {
-                    screen.on_resize(cols, rows);
-                    grid = Some(g);
-                }
-                Err(e) => tracing::error!("attach the grid: {e}"),
-            },
-            Input::Resize { cols, rows } => {
+    while app.is_running() {
+        tokio::select! {
+            input = inputs.recv() => match input {
+                None => break,
+                Some(Input::Attach { cols, rows, frames }) => match attach(cols, rows, frames) {
+                    Ok(g) => grid = Some(g),
+                    Err(e) => tracing::error!("attach the grid: {e}"),
+                },
                 // The next draw sees the new size and resizes its buffers.
-                if let Some(g) = grid.as_mut() {
-                    g.backend_mut().size = Size::new(cols, rows);
+                Some(Input::Resize { cols, rows }) => {
+                    if let Some(g) = grid.as_mut() {
+                        g.backend_mut().size = Size::new(cols, rows);
+                    }
                 }
-                screen.on_resize(cols, rows);
-            }
-            Input::Event(event) => screen.on_event(event),
+                Some(Input::Event(Event::Key(key))) => app.handle_key(key),
+                Some(Input::Event(Event::Paste(text))) => app.handle_paste(&text),
+                Some(Input::Event(_)) => {}
+            },
+            wake = app.wake() => app.on_wake(wake),
         }
         if let Some(g) = grid.as_mut()
-            && let Err(e) = g.draw(|frame| screen.render(frame))
+            && let Err(e) = g.draw(|frame| app.render(frame))
         {
             tracing::error!("draw: {e}");
         }
