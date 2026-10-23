@@ -3,14 +3,168 @@
 <head>
   <meta charset="utf-8">
   <title>Konstruct</title>
-  <link rel="stylesheet" href="vendor/xterm/xterm.css">
   <link rel="stylesheet" href="style.css">
-  <script src="vendor/xterm/xterm.js"></script>
-  <script src="vendor/xterm/addon-webgl.js"></script>
-  <script src="vendor/xterm/addon-fit.js"></script>
 </head>
 <body>
-  <div id="grid"></div>
+  <!-- Starting: restoring the session -->
+  <section id="screen-starting" class="screen centered" hidden>
+    <div class="column">
+      <div class="wordmark" data-t="appTitle"></div>
+      <p class="dim" data-t="starting"></p>
+    </div>
+  </section>
+
+  <!-- Onboarding -->
+  <section id="screen-onboarding" class="screen centered" hidden>
+    <form class="column" id="onboarding-form">
+      <div class="logo" aria-hidden="true"></div>
+      <div class="wordmark" data-t="appTitle"></div>
+      <p class="dim tagline" data-t="tagline"></p>
+      <input id="alias" class="field" autocomplete="off" spellcheck="false" data-tp="aliasPlaceholder">
+      <button type="submit" class="primary" data-t="createIdentity"></button>
+      <button type="button" class="link" id="go-link" data-t="linkThisDevice"></button>
+    </form>
+  </section>
+
+  <!-- Registering -->
+  <section id="screen-registering" class="screen centered" hidden>
+    <div class="column">
+      <div class="wordmark" data-t="appTitle"></div>
+      <p id="reg-label" class="dim"></p>
+      <div class="progress"><div id="reg-bar"></div></div>
+      <p class="dim small" data-t="registeringHint"></p>
+    </div>
+  </section>
+
+  <!-- Linking: the phone scans this -->
+  <section id="screen-link" class="screen centered" hidden>
+    <div class="column">
+      <h1 class="title" data-t="linkTitle"></h1>
+      <p class="dim" data-t="linkHint"></p>
+      <div class="qr-frame"><img id="link-qr" alt="" hidden><div id="link-wait" class="dim small" data-t="making"></div></div>
+      <p id="link-error" class="error" hidden></p>
+      <div class="row">
+        <button type="button" id="link-retry" class="secondary" data-t="newCode" hidden></button>
+        <button type="button" id="link-back" class="secondary" data-t="back"></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Passphrase: unlock, or protect a new account where there is no OS key store -->
+  <section id="screen-passphrase" class="screen centered" hidden>
+    <form class="column" id="passphrase-form">
+      <div class="wordmark" data-t="appTitle"></div>
+      <p id="passphrase-hint" class="dim"></p>
+      <input id="passphrase" type="password" class="field" autocomplete="current-password">
+      <button type="submit" class="primary" id="passphrase-submit"></button>
+    </form>
+  </section>
+
+  <!-- Main: chats and the open conversation -->
+  <section id="screen-main" class="screen main" hidden>
+    <aside class="sidebar">
+      <header class="sidebar-head">
+        <span class="sidebar-title" data-t="chats"></span>
+        <button type="button" class="icon" id="add-contact" data-tl="addContact">
+          <svg viewBox="0 0 24 24"><path d="M15 19c0-2.8-2.7-5-6-5s-6 2.2-6 5M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M19 8v6M16 11h6"/></svg>
+        </button>
+      </header>
+      <input id="chat-search" class="search" type="search" spellcheck="false" data-tp="search">
+      <ul id="chat-list" class="chat-list" role="listbox"></ul>
+      <footer class="sidebar-foot">
+        <span id="connection" class="dot" data-tl="offline"></span>
+        <button type="button" class="link small" id="open-settings" data-t="settings"></button>
+      </footer>
+    </aside>
+    <main class="detail">
+      <div id="empty" class="empty">
+        <svg viewBox="0 0 24 24" class="hero"><path d="M4 5h11a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H9l-4 3v-3H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM19 9h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-1v3l-4-3h-4"/></svg>
+        <h2 class="headline" data-t="selectChat"></h2>
+        <p class="dim" data-t="selectChatHint"></p>
+        <button type="button" class="secondary" id="empty-add" data-t="addContact"></button>
+      </div>
+      <div id="chat" class="chat" hidden>
+        <header class="toolbar">
+          <span id="chat-avatar"></span>
+          <span id="chat-name" class="headline"></span>
+          <span class="spacer"></span>
+          <button type="button" class="icon" id="chat-info" data-tl="profile">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>
+          </button>
+        </header>
+        <div id="transcript" class="transcript" tabindex="-1"></div>
+        <form id="composer" class="composer">
+          <textarea id="draft" rows="1" data-tp="messagePlaceholder"></textarea>
+          <button type="submit" class="send" id="send" data-tl="send" disabled>
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16V8M8.5 11.5 12 8l3.5 3.5"/></svg>
+          </button>
+        </form>
+      </div>
+    </main>
+  </section>
+
+  <!-- Add contact -->
+  <dialog id="dlg-add" class="sheet">
+    <h2 class="headline" data-t="addContact"></h2>
+    <div class="tabs" role="tablist">
+      <button type="button" class="tab" data-tab="paste" data-t="pasteInvite"></button>
+      <button type="button" class="tab" data-tab="myqr" data-t="myQr"></button>
+    </div>
+    <div class="tab-pane" data-pane="paste">
+      <form id="find-form" class="row">
+        <input id="find-query" class="field grow" spellcheck="false" autocomplete="off" data-tp="findPlaceholder">
+        <button type="submit" class="primary" data-t="find"></button>
+      </form>
+      <ul id="find-results" class="results"></ul>
+    </div>
+    <div class="tab-pane" data-pane="myqr" hidden>
+      <p class="dim small" data-t="myQrHint"></p>
+      <div class="qr-frame"><img id="invite-qr" alt="" hidden><div id="invite-wait" class="dim small" data-t="making"></div></div>
+      <div class="row">
+        <button type="button" class="secondary" id="invite-copy" data-t="copyLink"></button>
+        <button type="button" class="secondary" id="invite-new" data-t="newCode"></button>
+      </div>
+    </div>
+    <div class="row end"><button type="button" class="secondary" data-close data-t="close"></button></div>
+  </dialog>
+
+  <!-- Contact info and safety number -->
+  <dialog id="dlg-info" class="sheet">
+    <div class="row"><span id="info-avatar"></span><h2 id="info-name" class="headline"></h2></div>
+    <p class="mono small dim" id="info-id"></p>
+    <h3 class="section" data-t="safetyNumbers"></h3>
+    <p class="small" id="info-hint"></p>
+    <div id="safety" class="safety mono"></div>
+    <div class="row end">
+      <button type="button" class="danger-link" id="info-delete" data-t="deleteChat"></button>
+      <span class="spacer"></span>
+      <button type="button" class="secondary" data-close data-t="close"></button>
+    </div>
+  </dialog>
+
+  <!-- Settings -->
+  <dialog id="dlg-settings" class="sheet">
+    <h2 class="headline" data-t="settings"></h2>
+    <h3 class="section" data-t="account"></h3>
+    <dl class="facts">
+      <dt data-t="accountId"></dt><dd class="mono" id="set-user"></dd>
+      <dt data-t="deviceId"></dt><dd class="mono" id="set-device"></dd>
+      <dt data-t="server"></dt><dd class="mono" id="set-server"></dd>
+    </dl>
+    <h3 class="section" data-t="appearance"></h3>
+    <div class="row" id="theme-choice">
+      <button type="button" class="tab" data-theme-choice="system" data-t="themeSystem"></button>
+      <button type="button" class="tab" data-theme-choice="dark" data-t="themeDark"></button>
+      <button type="button" class="tab" data-theme-choice="light" data-t="themeLight"></button>
+    </div>
+    <div class="row end">
+      <button type="button" class="danger-link" id="sign-out" data-t="signOut"></button>
+      <span class="spacer"></span>
+      <button type="button" class="secondary" data-close data-t="close"></button>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
   <script src="main.js"></script>
 </body>
 </html>
