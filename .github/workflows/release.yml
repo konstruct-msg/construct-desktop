@@ -1,0 +1,77 @@
+# Publishes a release: pushing a tag `vX.Y.Z` on main builds the Linux packages through the
+# `linux` workflow (the same build, tests and smoke test CI runs) and attaches them, with their
+# SHA-256 sums, to a GitHub release of that name.
+#
+# The tag must match the version in `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`;
+# the version moves by a PR first, the tag follows the merge (README, "Releasing").
+# While the version is 0.x the release is marked a pre-release.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches the version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -n1)
+          tauri=$(jq -r .version src-tauri/tauri.conf.json)
+          echo "tag $tag, Cargo.toml $cargo, tauri.conf.json $tauri"
+          [ "$tag" = "$cargo" ] && [ "$tag" = "$tauri" ] || { echo "the tag and the version differ"; exit 1; }
+          git fetch --quiet origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "the tag is not on main"; exit 1; }
+
+  build:
+    needs: version
+    uses: ./.github/workflows/linux.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: konstruct-linux
+          path: bundle
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir dist
+          find bundle -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) -exec cp {} dist/ \;
+          (cd dist && sha256sum * > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+          {
+            echo "Konstruct for Linux, $TAG."
+            echo
+            echo "| Package | For |"
+            echo "|---|---|"
+            echo "| \`.deb\` | Ubuntu, Linux Mint, Debian: \`sudo apt install ./Konstruct_*.deb\` |"
+            echo "| \`.rpm\` | Fedora, openSUSE: \`sudo dnf install ./Konstruct-*.rpm\` |"
+            echo "| \`.AppImage\` | any distribution: \`chmod +x Konstruct_*.AppImage\` and run it |"
+            echo
+            echo "Check a download with \`sha256sum -c SHA256SUMS --ignore-missing\`."
+            echo
+            echo "Built from:"
+            echo '```'
+            cat bundle/siblings.txt
+            echo '```'
+          } > notes.md
+
+          pre=""
+          case "$TAG" in v0.*) pre="--prerelease" ;; esac
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "Konstruct $TAG" \
+            --notes-file notes.md --verify-tag $pre
