@@ -3,8 +3,9 @@
 Konstruct for **Linux and Windows**. macOS is covered by the `Construct Desktop` target in
 construct-messenger; this repository is not for it.
 
-Decision: `~/Code/construct-docs/decisions/desktop-is-the-tui-client-with-a-second-shell.md`. Read
-it before working here.
+Decisions: `~/Code/construct-docs/decisions/desktop-web-interface.md` (the interface, since
+2026-10-23) and `desktop-is-the-tui-client-with-a-second-shell.md` (the client layer shared with
+the TUI). Read them before working here.
 
 ## Where to start
 
@@ -53,40 +54,38 @@ This crate takes its dependencies by path, so the siblings must sit next to it:
 
 ## What this is
 
-A Tauri 2 window whose whole content is a character grid. Ratatui draws the grid in Rust; xterm.js
-in the webview only paints the frames and sends input back. The program itself, meaning the
-account, keys, sessions, stream and storage, is `construct-client`, and what is shown is
-`construct-screens`; both live in the construct-client repository. This repository adds only the
-window.
+A Tauri 2 window with an HTML/CSS interface modelled on the macOS `Construct Desktop` target:
+sidebar of chats, conversation, composer, the `Color.CT` palette. The program itself — account,
+keys, sessions, stream, storage — is `construct-client` (construct-client repository), running in
+Rust. The webview draws typed view events and sends back what the person did.
 
 ```
-src-tauri/src/main.rs    Tauri commands: attach / resize / key / text
-src-tauri/src/grid.rs    ratatui → ANSI frames → Channel; runs construct-screens' App; the size
-                         comes from the webview, not a tty
-src-tauri/src/keys.rs    DOM KeyboardEvent → crossterm KeyEvent (shortcuts by physical key)
-ui/                      index.html, main.js, style.css; vendored xterm.js, JetBrains Mono
+src-tauri/src/main.rs    Tauri commands: attach, and one per intent (send_message, open_chat, …)
+src-tauri/src/bridge.rs  construct-client ⇄ webview: ClientEvent → ViewEvent, intent → ClientCommand;
+                         the model a reloaded page is redrawn from; QR codes rendered as SVG
+ui/                      index.html, main.js, style.css (no framework, no bundler); JetBrains Mono
 ```
 
 Until 2026-10-02 this repository held a different program: a Tauri app with an HTML interface
 and its own `engine.rs`, which re-decided what the core decides and stopped building when the
-core dropped its `desktop` feature. It was deleted, not migrated. Only the name remains.
+core dropped its `desktop` feature. It was deleted, not migrated. From 2026-10-02 to 2026-10-23
+the window drew the TUI's screens as a character grid; the owner replaced that with this interface.
 
 ## Invariants
 
-- **The webview sees frames, never the client.** No `ClientEvent`, contact list, key or token
-  crosses the IPC boundary, only rendered text and input. A feature that seems to need the
-  webview to know something is built as a screen in Rust.
-- **No interface in JavaScript.** `ui/main.js` paints and forwards input. A panel, a dialog or a
-  list written in HTML would be a third interface, which the decision exists to prevent.
-- **No protocol here.** Anything the core or `construct-client` decides is asked of them. The
-  previous `engine.rs` is what this rule is about.
-- **Shortcuts go by the physical key.** On a Cyrillic layout the browser reports Ctrl+K as
-  Ctrl+л. `keys.rs` takes the letter from `KeyboardEvent.code` when a modifier is held, and the
-  copy/paste checks in `main.js` do the same. Russian is the main audience's layout.
-- **The CSP stays strict** (`tauri.conf.json`): only local scripts, no remote origins, and no
-  plugin permissions beyond `core:default`.
-- **Vendored xterm.js is unmodified.** The versions are listed in `ui/vendor/xterm/VERSIONS`;
-  update it by the route described there.
+- **The webview sees what is on screen, never the client's secrets.** `ViewEvent` carries names,
+  message text, ids, QR images. No key, token, certificate, session or protocol state crosses the
+  IPC boundary, and every intent from the webview is something the client checks.
+- **Nothing from the network becomes markup.** Names and message text go into the page with
+  `textContent`. `innerHTML` is used only with the page's own literals (two SVG icons).
+- **No protocol in JavaScript.** `ui/main.js` draws and forwards intents; anything the core or
+  `construct-client` decides is asked of them. The previous `engine.rs` is what this rule is about.
+- **No framework, no bundler, no third-party JS.** The interface stays small enough to read whole,
+  and the CSP stays simple.
+- **Shortcuts go by the physical key** (`KeyboardEvent.code`). On a Cyrillic layout the browser
+  reports Ctrl+K as Ctrl+л. Russian is the main audience's layout.
+- **The CSP stays strict** (`tauri.conf.json`): only local scripts, no remote origins, images only
+  local or `data:`, and no plugin permissions beyond `core:default`.
 
 ## Build & run
 
