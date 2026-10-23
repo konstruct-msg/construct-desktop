@@ -17,6 +17,8 @@ on:
       client-ref:
         description: "construct-client branch or commit to build against"
         default: main
+  # The release workflow builds through this one, so a release is the same build CI checks.
+  workflow_call:
 
 permissions:
   contents: read
@@ -112,10 +114,19 @@ jobs:
           if grep -qi panicked smoke.log; then exit 1; fi
           [ "$code" = 124 ] || { echo "konstruct-desktop exited with $code before the timeout"; exit 1; }
 
+      # The siblings are path dependencies on their main (see the top of this file), so the
+      # commits a build used are recorded next to it; the release notes carry them.
+      - name: Sibling commits
+        run: |
+          for r in construct-desktop construct-client construct-core construct-protos; do
+            echo "$r $(git -C $r rev-parse HEAD)"
+          done | tee construct-desktop/target/release/bundle/siblings.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: konstruct-linux
           path: |
+            construct-desktop/target/release/bundle/siblings.txt
             construct-desktop/target/release/bundle/deb/*.deb
             construct-desktop/target/release/bundle/rpm/*.rpm
             construct-desktop/target/release/bundle/appimage/*.AppImage

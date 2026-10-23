@@ -99,8 +99,9 @@ npx @tauri-apps/cli@2 build             # deb/rpm/AppImage on Linux, nsis/msi on
 repository; the client and screens crates are path dependencies. The pre-push hook runs fmt and clippy (`-D warnings`).
 
 `cargo run` works on macOS too, which is enough for development. The installers come only from
-the target system: deb, rpm and AppImage from Linux, nsis and msi from Windows. Until CI builds
-them (stage 5 of the plan), no Linux or Windows build has been run.
+the target system: deb, rpm and AppImage from Linux, nsis and msi from Windows. The `linux`
+workflow builds the Linux ones on every change; a tag `vX.Y.Z` on main publishes them as a GitHub
+release through `release.yml` (README, "Releasing"). Windows is stage 5 of the plan.
 
 ## Documentation & session notes
 
