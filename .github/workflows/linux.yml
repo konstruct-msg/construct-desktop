@@ -3,7 +3,9 @@
 # The crates take construct-client, construct-core and construct-protos by path, so they are
 # checked out beside this repository, as on a developer's machine (AGENTS.md, "Checkouts").
 # Until the dependencies are git ones (TODO 218, stage 5) a build here uses those repositories'
-# main branches as they are at the time of the run.
+# main branches as they are at the time of the run — so it runs without `--locked`: the sibling
+# crates' versions move with their main, and the lockfile follows them in the runner only. A
+# breaking change on a sibling's main shows here first.
 name: linux
 
 on:
@@ -65,11 +67,11 @@ jobs:
 
       - name: Clippy
         working-directory: construct-desktop
-        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Tests
         working-directory: construct-desktop
-        run: cargo test --workspace --locked
+        run: cargo test --workspace
 
       - name: Installers
         working-directory: construct-desktop
