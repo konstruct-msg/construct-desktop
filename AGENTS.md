@@ -6,6 +6,54 @@ construct-messenger; this repository is not for it.
 Decision: `~/Code/construct-docs/decisions/desktop-is-the-tui-client-with-a-second-shell.md`. Read
 it before working here.
 
+## Where to start
+
+The work plan, its stages and their gates, and the progress log are in the vault task
+`~/Code/construct-docs/todo/218-desktop-linux-windows-plan.md`. Read it first. Then take the
+first stage that is not done, and add a line to its «Ход» when you finish.
+
+State on 2026-10-23:
+
+- The window, input and resizing work, but the screen inside is still a placeholder.
+- **The tree does not build** against the current `construct-core` (0.57). `construct-client` was
+  last built against core 0.30 (2026-10-02). The first error is the `PlatformBridge` import in
+  `construct-client/src/bridge.rs`, removed by core 0.54 (`31b3de5`, "remove the dead code").
+  More errors will follow it.
+- The client has never exchanged a message with iOS in both directions. What separates them is
+  listed in the task.
+
+## Checkouts and who owns them
+
+This crate takes its dependencies by path, so the siblings must sit next to it:
+`~/Code/construct-tui` (it contains `construct-client`), `~/Code/construct-core`, and
+`~/Code/construct-veil`. All three use one toolchain, set in `rust-toolchain.toml`.
+
+- Other agent sessions work in the `construct-core` and `construct-protos` working copies. Never
+  switch their branches. Make changes there in a worktree, on a branch, through a PR. The owner
+  merges PRs in `construct-core`.
+- `construct-tui` is where `construct-client` changes. Make those changes in `construct-tui` as
+  well, on their own branch and PR, and not as a copy in this repository.
+- To build this repository from a worktree, place symlinks to the siblings next to it, so that
+  `../../construct-tui` resolves.
+- Turn the hooks on once per clone with `git config core.hooksPath .githooks`. The commit-msg hook
+  strips `Co-authored-by` lines; that is intended.
+
+## Working rules beyond this file
+
+- **Testing against the server.** Before release, the test and production server are the same
+  machine (owner, 2026-10-23). Registering test accounts and sending messages there for interop
+  checks is allowed. Keep them recognisably test accounts.
+- **This repository is public.** Never write server host names, IP addresses or other people's
+  personal data here, in commit messages, or in PR descriptions. Keep the wording neutral.
+- On the delivery or crypto path, every commit answers the three questions in
+  `construct-messenger/AGENTS.md`:
+  1. What does the server learn?
+  2. What can a party withhold or substitute?
+  3. Which trust boundary moves?
+- Protocol decisions are the core's (see "No protocol here" below). Before writing one in Rust
+  here or in `construct-client`, look in `construct-core/src/construct_core.udl` and the crate API
+  for it.
+
 ## What this is
 
 A Tauri 2 window whose whole content is a character grid. Ratatui draws the grid in Rust; xterm.js
@@ -52,6 +100,10 @@ npx @tauri-apps/cli@2 build             # deb/rpm/AppImage on Linux, nsis/msi on
 
 `construct-tui` and `construct-core` must be checked out next to this repository; the client
 crate is a path dependency. The pre-push hook runs fmt and clippy (`-D warnings`).
+
+`cargo run` works on macOS too, which is enough for development. The installers come only from
+the target system: deb, rpm and AppImage from Linux, nsis and msi from Windows. Until CI builds
+them (stage 5 of the plan), no Linux or Windows build has been run.
 
 ## Documentation & session notes
 
