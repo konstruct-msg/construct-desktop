@@ -133,6 +133,42 @@ fn percent_decode(s: &str) -> String {
 }
 
 #[tauri::command]
+fn set_focus(focused: bool, intents: State<Intents>) {
+    intents.send(Intent::Focus(focused));
+}
+
+#[tauri::command]
+fn set_notifications(settings: bridge::Notifications, intents: State<Intents>) {
+    intents.send(Intent::Notifications(settings));
+}
+
+#[tauri::command]
+fn load_settings(intents: State<Intents>) {
+    intents.send(Intent::LoadSettings);
+}
+
+#[tauri::command]
+fn change_username(username: String, intents: State<Intents>) {
+    intents.send(Intent::ChangeUsername(username));
+}
+
+#[tauri::command]
+fn set_discoverable(on: bool, intents: State<Intents>) {
+    intents.send(Intent::SetDiscoverable(on));
+}
+
+#[tauri::command]
+fn set_delivery_receipts(on: bool, intents: State<Intents>) {
+    intents.send(Intent::SetDeliveryReceipts(on));
+}
+
+/// Sign out device `device_id` of this account, or every other one when it is absent.
+#[tauri::command]
+fn revoke_devices(device_id: Option<String>, intents: State<Intents>) {
+    intents.send(Intent::RevokeDevices(device_id));
+}
+
+#[tauri::command]
 fn load_media(message_id: String, index: usize, intents: State<Intents>) {
     intents.send(Intent::LoadMedia { message_id, index });
 }
@@ -317,6 +353,13 @@ fn main() {
             react,
             delete_message,
             send_file,
+            set_focus,
+            set_notifications,
+            load_settings,
+            change_username,
+            set_discoverable,
+            set_delivery_receipts,
+            revoke_devices,
             load_media,
             save_media,
             open_downloads,

@@ -293,3 +293,46 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
          border: 1px solid var(--noise); font-size: 12px; }
 .toast.error { border-color: var(--danger); color: var(--danger); }
 .toast.action { cursor: pointer; }
+
+/* ── Settings ─────────────────────────────────────────────────────── */
+dialog.settings { width: 760px; height: min(600px, calc(100vh - 48px)); padding: 0; }
+dialog.settings[open] { display: grid; grid-template-columns: 200px 1fr; }
+.settings-nav { display: flex; flex-direction: column; gap: 2px; padding: 20px 10px;
+  border-right: 1px solid var(--noise); background: var(--panel); }
+.settings-nav .headline { padding: 0 10px 12px; }
+.settings-nav button[data-pane] { text-align: left; border: none; background: none;
+  padding: 8px 10px; border-radius: 8px; color: var(--text); }
+.settings-nav button[data-pane]:hover { background: var(--noise); }
+.settings-nav button[aria-current="true"] { background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent); }
+.settings-nav .spacer { flex: 1; }
+.settings-body { display: flex; flex-direction: column; padding: 20px 24px; overflow-y: auto; min-width: 0; }
+.settings-pane { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+.settings-pane .section { margin-top: 8px; }
+.settings-pane > p { margin: -4px 0 0; }
+.profile-head { display: flex; gap: 14px; align-items: center; }
+.profile-name { font-size: 16px; font-weight: 700; }
+.field-row .field { flex: 1; }
+.toggle { display: flex; gap: 10px; align-items: center; cursor: pointer; }
+.toggle input { appearance: none; width: 34px; height: 20px; border-radius: 10px; flex: none; margin: 0;
+  background: var(--noise); position: relative; cursor: pointer; transition: background .15s; }
+.toggle input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: #fff; transition: left .15s; }
+.toggle input:checked { background: var(--accent); }
+.toggle input:checked::after { left: 16px; }
+.toggle input:disabled { opacity: .5; cursor: default; }
+.choice .tab { flex: 1; }
+.previews { display: flex; flex-direction: column; gap: 6px; }
+.previews .tab { height: auto; padding: 8px 12px; display: flex; flex-direction: column;
+  align-items: flex-start; gap: 2px; text-align: left; }
+.previews.off { opacity: .5; pointer-events: none; }
+.devices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.devices li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--noise); }
+.devices .device-label { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.devices .device-badge { font-size: 11px; color: var(--accent); }
+
+/* Chats and look */
+:root[data-text-size="compact"] .bubble { font-size: 13px; }
+:root[data-text-size="large"] .bubble { font-size: 17px; }
+:root[data-times="off"] .msg .meta .time { display: none; }

@@ -63,6 +63,28 @@ const WORDS = {
     loading: "Loading…", mediaFailed: "Did not load: {reason}", retry: "Try again",
     play: "Play", close: "Close", attach: "Attach a file", sending: "Sending {name}…",
     tooLarge: "{name} is larger than 95 MB and cannot be sent",
+    profile: "Profile", devices: "Devices", chatsAndLook: "Chats and look",
+    notificationsAndPrivacy: "Notifications and privacy", usernamePlaceholder: "username",
+    saveUsername: "Save", noUsername: "No username",
+    usernameHint: "3 to 20 letters, digits or _. People find you by it when you allow it below.",
+    discoverable: "People can find me by username",
+    discoverableNeedsName: "Choose a username first.",
+    discoverableHint: "Off: only people you gave an invite link or QR code can write to you.",
+    devicesHint: "Devices signed in to this account. Their names are not shown here yet.",
+    thisDevice: "This device", mainDevice: "Main device", deviceAdded: "added {date}",
+    deviceName: "Device {id}", revoke: "Sign out", confirmRevoke: "Sign it out? Click again",
+    revokeOthers: "Sign out all other devices", confirmRevokeOthers: "Sign out every other device? Click again",
+    loadingDevices: "Loading…", textSize: "Text size", textCompact: "Compact", textStandard: "Standard",
+    textLarge: "Large", language: "Language", langAuto: "As in the system", chatsSection: "Chats",
+    sendOnEnter: "Send with Enter",
+    sendOnEnterHint: "Off: Enter starts a new line, Ctrl+Enter sends.",
+    showTimes: "Show the time of each message", notifications: "Notifications",
+    notifyOn: "Notify me of new messages", newMessage: "New message",
+    previewNameAndMessage: "Name and message", previewNameAndMessageHint: "Show the sender and the text",
+    previewNameOnly: "Name only", previewNameOnlyHint: "Show only who wrote",
+    previewNone: "No preview", previewNoneHint: "Show only “New message”",
+    privacy: "Privacy", deliveryReceipts: "Send delivery receipts",
+    deliveryReceiptsHint: "Off: people do not see that your devices received their messages. You still see theirs.",
   },
   ru: {
     appTitle: "КОНСТРУКТ", starting: "Открываю…",
@@ -117,9 +139,37 @@ const WORDS = {
     loading: "Загрузка…", mediaFailed: "Не загрузилось: {reason}", retry: "Повторить",
     play: "Воспроизвести", close: "Закрыть", attach: "Прикрепить файл", sending: "Отправляется {name}…",
     tooLarge: "{name} больше 95 МБ — такой файл не отправить",
+    profile: "Профиль", devices: "Устройства", chatsAndLook: "Чаты и вид",
+    notificationsAndPrivacy: "Уведомления и приватность", usernamePlaceholder: "имя пользователя",
+    saveUsername: "Сохранить", noUsername: "Без имени пользователя",
+    usernameHint: "От 3 до 20 латинских букв, цифр или _. По нему вас находят, если вы разрешите ниже.",
+    discoverable: "Меня можно найти по имени пользователя",
+    discoverableNeedsName: "Сначала выберите имя пользователя.",
+    discoverableHint: "Выключено: написать вам смогут только те, кому вы дали ссылку-приглашение или QR-код.",
+    devicesHint: "Устройства, в которых открыт этот аккаунт. Их названия здесь пока не показываются.",
+    thisDevice: "Это устройство", mainDevice: "Основное устройство", deviceAdded: "добавлено {date}",
+    deviceName: "Устройство {id}", revoke: "Отключить", confirmRevoke: "Отключить? Нажмите ещё раз",
+    revokeOthers: "Отключить все остальные устройства", confirmRevokeOthers: "Отключить все остальные? Нажмите ещё раз",
+    loadingDevices: "Загрузка…", textSize: "Размер текста", textCompact: "Мелкий", textStandard: "Обычный",
+    textLarge: "Крупный", language: "Язык", langAuto: "Как в системе", chatsSection: "Чаты",
+    sendOnEnter: "Отправлять по Enter",
+    sendOnEnterHint: "Выключено: Enter переносит строку, Ctrl+Enter отправляет.",
+    showTimes: "Показывать время сообщений", notifications: "Уведомления",
+    notifyOn: "Уведомлять о новых сообщениях", newMessage: "Новое сообщение",
+    previewNameAndMessage: "Имя и текст", previewNameAndMessageHint: "Показывать отправителя и текст",
+    previewNameOnly: "Только имя", previewNameOnlyHint: "Показывать только, кто написал",
+    previewNone: "Без превью", previewNoneHint: "Показывать только «Новое сообщение»",
+    privacy: "Приватность", deliveryReceipts: "Отправлять отчёты о доставке",
+    deliveryReceiptsHint: "Выключено: собеседники не видят, что сообщение дошло до ваших устройств. Их отчёты вы видите по-прежнему.",
   },
 };
-const LANG = (navigator.language || "en").toLowerCase().startsWith("ru") ? "ru" : "en";
+// The language chosen in settings, or the system's. A change reloads the page.
+const LANG = (() => {
+  let chosen = null;
+  try { chosen = localStorage.getItem("lang"); } catch { /* per-viewer convenience */ }
+  if (chosen === "ru" || chosen === "en") return chosen;
+  return (navigator.language || "en").toLowerCase().startsWith("ru") ? "ru" : "en";
+})();
 const t = (key, vars = {}) =>
   (WORDS[LANG][key] ?? WORDS.en[key] ?? key).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? "");
 
@@ -236,6 +286,7 @@ const state = {
   recovery: "unknown",
   filter: "",
   invite: null,
+  settings: null, // the account's settings as the client last sent them
   link: null,
 };
 
@@ -404,7 +455,7 @@ function messageNode(m, previous) {
     mark.innerHTML = m.delivered ? DELIVERED : SENT; // our own literals, never message data
     meta.append(mark);
   }
-  meta.append(el("span", "", clock(m.time)));
+  meta.append(el("span", "time", clock(m.time)));
   const more = el("button", "more", "⋯");
   more.type = "button";
   more.setAttribute("aria-label", t("messageActions"));
@@ -743,7 +794,9 @@ $("attach-file").addEventListener("change", (ev) => {
 
 draft.addEventListener("input", fitDraft);
 draft.addEventListener("keydown", (ev) => {
-  if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229) {
+  // Enter sends, or with the setting off Ctrl+Enter does and Enter breaks the line.
+  const sends = flag("sendOnEnter") ? !ev.shiftKey && !ev.ctrlKey && !ev.metaKey : ev.ctrlKey || ev.metaKey;
+  if (ev.key === "Enter" && sends && !ev.isComposing && ev.keyCode !== 229) {
     ev.preventDefault();
     sendDraft();
   } else if (ev.key === "Escape" && state.compose) {
@@ -864,16 +917,137 @@ $("info-delete").addEventListener("click", (ev) =>
   }),
 );
 
-function openSettings() {
+// Choices kept in this window (the theme, text, language, notifications); the account's own
+// (username, devices, receipts) come from the client as a `settings` event.
+const PREF_DEFAULTS = {
+  textSize: "standard", lang: "auto", preview: "nameAndMessage",
+  sendOnEnter: "1", showTimes: "1", notify: "1",
+};
+const pref = (k) => store.get(k) ?? PREF_DEFAULTS[k];
+const flag = (k) => pref(k) === "1";
+
+function applyPrefs() {
+  document.documentElement.dataset.textSize = pref("textSize");
+  document.documentElement.dataset.times = flag("showTimes") ? "on" : "off";
+}
+
+// Rust shows the notifications; it is told what they may say, in this page's language.
+function sendNotificationPrefs() {
+  invoke("set_notifications", {
+    settings: { enabled: flag("notify"), preview: pref("preview"), newMessage: t("newMessage") },
+  }).catch(() => {});
+}
+
+function openSettings(pane = "profile") {
   $("set-user").textContent = state.account?.userId ?? "";
   $("set-device").textContent = state.account?.deviceId ?? "";
   $("set-server").textContent = state.account?.server ?? "";
   $("set-version").textContent = state.account?.version ?? "";
+  $("set-avatar").replaceChildren(avatar(state.account?.userId ?? ""));
   invoke("logs_path").then((path) => ($("set-logs").textContent = path)).catch(() => {});
   renderRecovery();
   markTheme();
+  markPrefs();
+  renderAccountSettings();
+  invoke("load_settings");
+  showPane(pane);
   $("dlg-settings").showModal();
 }
+
+function showPane(name) {
+  for (const p of document.querySelectorAll(".settings-pane")) p.hidden = p.dataset.pane !== name;
+  for (const b of $("settings-nav").querySelectorAll("[data-pane]")) b.setAttribute("aria-current", String(b.dataset.pane === name));
+}
+$("settings-nav").addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-pane]");
+  if (b) showPane(b.dataset.pane);
+});
+
+function markPrefs() {
+  for (const group of document.querySelectorAll("[data-pref]")) {
+    for (const b of group.querySelectorAll("[data-value]")) b.setAttribute("aria-selected", String(b.dataset.value === pref(group.dataset.pref)));
+  }
+  for (const box of document.querySelectorAll("[data-pref-flag]")) box.checked = flag(box.dataset.prefFlag);
+  document.querySelector('[data-pref="preview"]').classList.toggle("off", !flag("notify"));
+}
+for (const group of document.querySelectorAll("[data-pref]")) {
+  group.addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-value]");
+    if (!b) return;
+    const key = group.dataset.pref;
+    if (pref(key) === b.dataset.value) return;
+    store.set(key, b.dataset.value);
+    if (key === "lang") return location.reload();
+    applyPrefs();
+    markPrefs();
+    if (key === "preview") sendNotificationPrefs();
+  });
+}
+for (const box of document.querySelectorAll("[data-pref-flag]")) {
+  box.addEventListener("change", () => {
+    store.set(box.dataset.prefFlag, box.checked ? "1" : "0");
+    applyPrefs();
+    markPrefs();
+    if (box.dataset.prefFlag === "notify") sendNotificationPrefs();
+  });
+}
+
+// ── The account's settings ──────────────────────────────────────────────────
+
+function onSettings(e) {
+  state.settings = e;
+  renderAccountSettings();
+}
+
+function renderAccountSettings() {
+  const s = state.settings;
+  const name = s?.username;
+  $("set-name").textContent = state.account?.name ?? "";
+  $("set-username").textContent = name ? `@${name}` : t("noUsername");
+  if (document.activeElement !== $("username-input")) $("username-input").value = name ?? "";
+  const discoverable = $("set-discoverable");
+  discoverable.checked = Boolean(s?.discoverable);
+  discoverable.disabled = !s || !name;
+  $("discoverable-hint").textContent = s && !name ? t("discoverableNeedsName") : t("discoverableHint");
+  $("set-receipts").checked = s ? s.deliveryReceipts : true;
+  $("set-receipts").disabled = !s;
+
+  const list = $("set-devices");
+  if (!s) return list.replaceChildren(el("li", "dim", t("loadingDevices")));
+  const devices = [...s.devices].sort((a, b) => Number(b.current) - Number(a.current) || a.created - b.created);
+  list.replaceChildren(...devices.map((d) => {
+    const li = el("li");
+    const label = el("div", "device-label");
+    label.append(el("span", "", t("deviceName", { id: d.id.slice(0, 8) })));
+    const facts = [d.current ? t("thisDevice") : "", d.primary ? t("mainDevice") : ""].filter(Boolean).join(" · ");
+    if (facts) label.append(el("span", "device-badge", facts));
+    if (d.created) label.append(el("span", "small dim", t("deviceAdded", { date: new Date(d.created).toLocaleDateString(LANG) })));
+    li.append(label);
+    if (!d.current && !d.primary) {
+      const revoke = el("button", "danger-link", t("revoke"));
+      revoke.type = "button";
+      revoke.addEventListener("click", (ev) =>
+        confirmTwice(ev.currentTarget, "confirmRevoke", () => invoke("revoke_devices", { deviceId: d.id })));
+      li.append(revoke);
+    }
+    return li;
+  }));
+  $("revoke-others").hidden = !devices.some((d) => !d.current && !d.primary);
+}
+
+$("username-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const name = $("username-input").value.trim();
+  if (name && name !== state.settings?.username) invoke("change_username", { username: name });
+});
+$("set-discoverable").addEventListener("change", (ev) => invoke("set_discoverable", { on: ev.target.checked }));
+$("set-receipts").addEventListener("change", (ev) => invoke("set_delivery_receipts", { on: ev.target.checked }));
+$("revoke-others").addEventListener("click", (ev) =>
+  confirmTwice(ev.currentTarget, "confirmRevokeOthers", () => invoke("revoke_devices", { deviceId: null })));
+
+window.addEventListener("focus", () => invoke("set_focus", { focused: true }).catch(() => {}));
+window.addEventListener("blur", () => invoke("set_focus", { focused: false }).catch(() => {}));
+
 $("sign-out").addEventListener("click", (ev) =>
   confirmTwice(ev.currentTarget, "confirmSignOut", () => {
     $("dlg-settings").close();
@@ -1021,7 +1195,7 @@ $("chat-search").addEventListener("input", (ev) => {
 });
 $("add-contact").addEventListener("click", openAddContact);
 $("empty-add").addEventListener("click", openAddContact);
-$("open-settings").addEventListener("click", openSettings);
+$("open-settings").addEventListener("click", () => openSettings());
 $("chat-info").addEventListener("click", openInfo);
 
 // Shortcuts by physical key, so they work on a Russian layout too (Ctrl+K is not Ctrl+Л).
@@ -1113,11 +1287,14 @@ function onEvent(e) {
     case "recoveryPhrase": showWords(e.words); break;
     case "recoveryFailed": onRecoveryFailed(e.reason); break;
     case "notice": toast(e.text, e.error); break;
+    case "settings": onSettings(e); break;
   }
 }
 
 async function start() {
   applyTheme(store.get("theme") ?? "dark");
+  applyPrefs();
+  sendNotificationPrefs();
   translatePage();
   const events = new Channel();
   events.onmessage = onEvent;
