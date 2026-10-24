@@ -168,6 +168,41 @@ fn revoke_devices(device_id: Option<String>, intents: State<Intents>) {
     intents.send(Intent::RevokeDevices(device_id));
 }
 
+/// Our shared name; the picture stays.
+#[tauri::command]
+fn set_display_name(name: String, intents: State<Intents>) {
+    intents.send(Intent::SetProfile {
+        display_name: Some(name),
+        avatar: construct_client::AvatarChange::Keep,
+    });
+}
+
+/// Our picture: the JPEG the page made from the file chosen, as the body. The client checks it.
+#[tauri::command]
+fn set_avatar(request: tauri::ipc::Request<'_>, intents: State<Intents>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("no picture".into());
+    };
+    intents.send(Intent::SetProfile {
+        display_name: None,
+        avatar: construct_client::AvatarChange::Set(bytes.clone()),
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_avatar(intents: State<Intents>) {
+    intents.send(Intent::SetProfile {
+        display_name: None,
+        avatar: construct_client::AvatarChange::Remove,
+    });
+}
+
+#[tauri::command]
+fn share_profile(peer_id: String, on: bool, intents: State<Intents>) {
+    intents.send(Intent::ShareProfile { peer_id, on });
+}
+
 #[tauri::command]
 fn load_media(message_id: String, index: usize, intents: State<Intents>) {
     intents.send(Intent::LoadMedia { message_id, index });
@@ -360,6 +395,10 @@ fn main() {
             set_discoverable,
             set_delivery_receipts,
             revoke_devices,
+            set_display_name,
+            set_avatar,
+            remove_avatar,
+            share_profile,
             load_media,
             save_media,
             open_downloads,

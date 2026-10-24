@@ -85,6 +85,12 @@ const WORDS = {
     previewNone: "No preview", previewNoneHint: "Show only “New message”",
     privacy: "Privacy", deliveryReceipts: "Send delivery receipts",
     deliveryReceiptsHint: "Off: people do not see that your devices received their messages. You still see theirs.",
+    choosePhoto: "Choose a photo…", removePhoto: "Remove photo", displayName: "Name",
+    displayNamePlaceholder: "Your name, as contacts see it", usernameSection: "Username",
+    profileHint: "Only people you share your profile with see your name and photo. The switch is in each contact's card.",
+    shareProfile: "Share my name and photo",
+    shareProfileHint: "They get your profile now, and again whenever you change it.",
+    photoUnreadable: "This picture could not be read", photoSending: "Photo saved; contacts get it shortly",
   },
   ru: {
     appTitle: "КОНСТРУКТ", starting: "Открываю…",
@@ -161,6 +167,12 @@ const WORDS = {
     previewNone: "Без превью", previewNoneHint: "Показывать только «Новое сообщение»",
     privacy: "Приватность", deliveryReceipts: "Отправлять отчёты о доставке",
     deliveryReceiptsHint: "Выключено: собеседники не видят, что сообщение дошло до ваших устройств. Их отчёты вы видите по-прежнему.",
+    choosePhoto: "Выбрать фото…", removePhoto: "Убрать фото", displayName: "Имя",
+    displayNamePlaceholder: "Ваше имя для контактов", usernameSection: "Имя пользователя",
+    profileHint: "Имя и фото видят только те, с кем вы делитесь профилем. Переключатель — в карточке контакта.",
+    shareProfile: "Делиться моим именем и фото",
+    shareProfileHint: "Профиль придёт им сейчас и потом при каждом изменении.",
+    photoUnreadable: "Эту картинку не удалось прочитать", photoSending: "Фото сохранено, контакты скоро его получат",
   },
 };
 // The language chosen in settings, or the system's. A change reloads the page.
@@ -210,7 +222,15 @@ function hash(text) {
 }
 
 /** A dot-matrix identicon from the account id, like the macOS avatar: drawn, not fetched. */
-function avatar(id, small = false) {
+// A person's picture when their profile carried one (a data URI Rust checked to be an image),
+// else the pattern drawn from their id. `url` overrides, for our own.
+function avatar(id, small = false, url = state.avatars.get(id)) {
+  if (url) {
+    const img = el("img", small ? "avatar small" : "avatar");
+    img.src = url;
+    img.alt = "";
+    return img;
+  }
   const svgNs = "http://www.w3.org/2000/svg";
   const h = hash(id);
   // Twelve hues 30° apart: two ids rarely land on colours that look the same.
@@ -287,6 +307,7 @@ const state = {
   filter: "",
   invite: null,
   settings: null, // the account's settings as the client last sent them
+  avatars: new Map(), // peerId → data URI of the picture their profile carried
   link: null,
 };
 
@@ -905,6 +926,7 @@ function openInfo() {
   $("info-name").textContent = chatName(peer);
   $("info-id").textContent = peer;
   $("info-hint").textContent = t("safetyHint", { name: chatName(peer) });
+  $("info-share").checked = Boolean(state.chats.find((c) => c.peerId === peer)?.sharing);
   $("safety").replaceChildren();
   invoke("safety_number", { peerId: peer });
   $("dlg-info").showModal();
@@ -943,7 +965,7 @@ function openSettings(pane = "profile") {
   $("set-device").textContent = state.account?.deviceId ?? "";
   $("set-server").textContent = state.account?.server ?? "";
   $("set-version").textContent = state.account?.version ?? "";
-  $("set-avatar").replaceChildren(avatar(state.account?.userId ?? ""));
+
   invoke("logs_path").then((path) => ($("set-logs").textContent = path)).catch(() => {});
   renderRecovery();
   markTheme();
@@ -1002,7 +1024,12 @@ function onSettings(e) {
 function renderAccountSettings() {
   const s = state.settings;
   const name = s?.username;
-  $("set-name").textContent = state.account?.name ?? "";
+  const own = s?.displayName || state.account?.name || "";
+  $("set-name").textContent = own;
+  $("set-avatar").replaceChildren(avatar(state.account?.userId ?? "", false, s?.avatar ?? undefined));
+  $("set-avatar").firstChild.classList.add("large");
+  $("avatar-remove").hidden = !s?.avatar;
+  if (document.activeElement !== $("name-input")) $("name-input").value = s?.displayName ?? "";
   $("set-username").textContent = name ? `@${name}` : t("noUsername");
   if (document.activeElement !== $("username-input")) $("username-input").value = name ?? "";
   const discoverable = $("set-discoverable");
@@ -1034,6 +1061,58 @@ function renderAccountSettings() {
   }));
   $("revoke-others").hidden = !devices.some((d) => !d.current && !d.primary);
 }
+
+$("info-share").addEventListener("change", (ev) => {
+  if (state.open) invoke("share_profile", { peerId: state.open, on: ev.target.checked });
+});
+
+$("name-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const name = $("name-input").value.trim();
+  if (name !== (state.settings?.displayName ?? "")) invoke("set_display_name", { name });
+});
+
+// The picture is made here, as a square JPEG of at most 512 px and 200 KB, the size iOS sends:
+// drawing it on a canvas also leaves its metadata behind. The client checks what it gets.
+const AVATAR_PX = 512;
+const AVATAR_MAX_BYTES = 200 * 1024;
+async function avatarJpeg(file) {
+  const url = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = reject;
+    i.src = url;
+  });
+  const side = Math.min(img.naturalWidth, img.naturalHeight);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = Math.min(AVATAR_PX, side);
+  canvas.getContext("2d").drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2,
+    side, side, 0, 0, canvas.width, canvas.height);
+  for (let q = 0.8; q > 0.05; q -= 0.1) {
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", q));
+    if (blob && blob.size <= AVATAR_MAX_BYTES) return new Uint8Array(await blob.arrayBuffer());
+  }
+  throw new Error("too large");
+}
+$("avatar-choose").addEventListener("click", () => $("avatar-file").click());
+$("avatar-file").addEventListener("change", async (ev) => {
+  const [file] = ev.target.files;
+  ev.target.value = "";
+  if (!file) return;
+  try {
+    await invoke("set_avatar", await avatarJpeg(file));
+    toast(t("photoSending"));
+  } catch {
+    toast(t("photoUnreadable"), true);
+  }
+});
+$("avatar-remove").addEventListener("click", () => invoke("remove_avatar"));
 
 $("username-form").addEventListener("submit", (ev) => {
   ev.preventDefault();
@@ -1288,6 +1367,11 @@ function onEvent(e) {
     case "recoveryFailed": onRecoveryFailed(e.reason); break;
     case "notice": toast(e.text, e.error); break;
     case "settings": onSettings(e); break;
+    case "avatar":
+      if (e.url) state.avatars.set(e.peerId, e.url); else state.avatars.delete(e.peerId);
+      renderChats();
+      if (state.open === e.peerId) $("chat-avatar").replaceChildren(avatar(e.peerId, true));
+      break;
   }
 }
 
