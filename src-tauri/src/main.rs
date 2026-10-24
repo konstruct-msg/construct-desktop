@@ -261,6 +261,23 @@ fn logout_everywhere(intents: State<Intents>) {
     intents.send(Intent::LogoutEverywhere);
 }
 
+/// Show a code a new device scans to join this account.
+#[tauri::command]
+fn offer_link(intents: State<Intents>) {
+    intents.send(Intent::OfferLink);
+}
+
+#[tauri::command]
+fn cancel_link_offer(intents: State<Intents>) {
+    intents.send(Intent::CancelLinkOffer);
+}
+
+/// Let the device whose `konstruct://link-to-me` code was pasted join this account.
+#[tauri::command]
+fn approve_device(code: String, intents: State<Intents>) {
+    intents.send(Intent::ApproveDevice(code));
+}
+
 /// Delete the account and wipe this device; `local_only`: wipe only.
 #[tauri::command]
 fn delete_account(local_only: bool, intents: State<Intents>) {
@@ -458,6 +475,9 @@ fn main() {
             mint_invite,
             logout,
             logout_everywhere,
+            offer_link,
+            cancel_link_offer,
+            approve_device,
             delete_account,
             clear_media_cache,
             set_media_prefs,

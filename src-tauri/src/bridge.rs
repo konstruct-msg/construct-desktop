@@ -98,9 +98,22 @@ pub enum ViewEvent {
         total: usize,
         label: String,
     },
-    /// The code the phone scans, as an SVG data URI the webview puts in an `<img>`.
+    /// The code the phone scans, as an SVG data URI the webview puts in an `<img>`, and as text
+    /// to copy to another computer: it names this device and its public keys, nothing secret.
     LinkCode {
         image: String,
+        code: String,
+    },
+    /// The code a new device scans to join this account, as an image only: it carries a secret
+    /// (Flow A), which stays out of the page's text. Valid until `expires_at`, Unix ms.
+    LinkOffer {
+        image: String,
+        expires_at: i64,
+    },
+    /// The offer ended: `device` linked, or `error` says why not.
+    LinkOfferEnded {
+        device: Option<String>,
+        error: Option<String>,
     },
     LinkFailed {
         reason: String,
@@ -358,6 +371,11 @@ pub enum Intent {
     EnterRecoveryPhrase(Zeroizing<String>),
     Logout,
     LogoutEverywhere,
+    /// Show a code for a new device to scan.
+    OfferLink,
+    CancelLinkOffer,
+    /// Let the device whose `link-to-me` code was pasted join this account.
+    ApproveDevice(String),
     DeleteAccount {
         local_only: bool,
     },
@@ -724,6 +742,19 @@ fn handle_intent(
         }
         Intent::Logout => client.send(ClientCommand::Logout),
         Intent::LogoutEverywhere => client.send(ClientCommand::LogoutEverywhere),
+        Intent::OfferLink => client.send(ClientCommand::OfferLink),
+        Intent::CancelLinkOffer => client.send(ClientCommand::CancelLinkOffer),
+        Intent::ApproveDevice(code) => match construct_client::device_certs::parse_join_code(&code)
+        {
+            Some(join) => client.send(ClientCommand::ApproveJoin {
+                device_id: join.device_id,
+                fingerprint: join.fingerprint,
+            }),
+            None => send(
+                view,
+                notice("That is not a device's link code".into(), true),
+            ),
+        },
         Intent::DeleteAccount { local_only } => {
             client.send(ClientCommand::DeleteAccount { local_only })
         }
@@ -757,6 +788,7 @@ fn snapshot(model: &Model) -> Vec<ViewEvent> {
     if let Some(code) = &model.link_code {
         events.push(ViewEvent::LinkCode {
             image: qr_image(code),
+            code: code.clone(),
         });
     }
     events
@@ -966,13 +998,27 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
         }],
         ClientEvent::LinkCode(code) => {
             let image = qr_image(&code);
-            model.link_code = Some(code);
-            vec![ViewEvent::LinkCode { image }]
+            model.link_code = Some(code.clone());
+            vec![ViewEvent::LinkCode { image, code }]
         }
         ClientEvent::LinkFailed(reason) => {
             model.link_code = None;
             vec![ViewEvent::LinkFailed { reason }]
         }
+        ClientEvent::LinkOffer { code, expires_at } => vec![ViewEvent::LinkOffer {
+            image: qr_image(&code),
+            expires_at: expires_at.saturating_mul(1000),
+        }],
+        ClientEvent::LinkOfferEnded(ended) => vec![match ended {
+            Ok(device) => ViewEvent::LinkOfferEnded {
+                device: Some(device),
+                error: None,
+            },
+            Err(error) => ViewEvent::LinkOfferEnded {
+                device: None,
+                error: Some(error),
+            },
+        }],
         ClientEvent::LoggedOut => {
             model.chats.clear();
             model.open_chat = None;
@@ -1370,6 +1416,37 @@ mod tests {
                 ..Default::default()
             },
         }
+    }
+
+    #[test]
+    fn a_link_offer_reaches_the_page_as_an_image_only() {
+        let mut model = model();
+        let secret = "ab".repeat(32);
+        let code = format!(
+            "konstruct://link?token=tok&fp={}&s={secret}",
+            "cd".repeat(32)
+        );
+        let events = on_client_event(
+            ClientEvent::LinkOffer {
+                code: Zeroizing::new(code),
+                expires_at: 100,
+            },
+            &mut model,
+            "",
+        );
+        let json = serde_json::to_string(&events).unwrap();
+        assert!(json.contains("data:image/svg+xml"), "the code is drawn");
+        assert!(
+            !json.contains(&secret),
+            "its secret is not in the page's text"
+        );
+        assert!(json.contains("100000"), "the expiry in ms");
+        assert!(
+            snapshot(&model)
+                .iter()
+                .all(|e| !matches!(e, ViewEvent::LinkOffer { .. })),
+            "and not kept for a reload"
+        );
     }
 
     #[test]
