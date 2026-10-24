@@ -37,6 +37,9 @@ const WORDS = {
     appearance: "Appearance", themeSystem: "System", themeDark: "Dark", themeLight: "Light",
     signOut: "Sign out", confirmSignOut: "Sign out and erase this device? Click again",
     today: "Today", yesterday: "Yesterday",
+    unvouchedToast: "{name} has a device none of their other devices confirmed. Open the chat to verify.",
+    unvouchedBanner: "{name} has a device none of their other devices confirmed. It may be theirs, or someone else's.",
+    compareSafety: "Compare safety numbers", unvouchedTitle: "Unconfirmed device",
   },
   ru: {
     appTitle: "КОНСТРУКТ", starting: "Открываю…",
@@ -64,6 +67,9 @@ const WORDS = {
     appearance: "Внешний вид", themeSystem: "Как в системе", themeDark: "Тёмная", themeLight: "Светлая",
     signOut: "Выйти", confirmSignOut: "Выйти и стереть данные устройства? Нажмите ещё раз",
     today: "Сегодня", yesterday: "Вчера",
+    unvouchedToast: "У {name} появилось устройство, которое не подтвердило ни одно другое устройство этого аккаунта. Откройте чат, чтобы проверить.",
+    unvouchedBanner: "У {name} появилось устройство, которое не подтвердило ни одно другое устройство этого аккаунта. Возможно, оно не принадлежит собеседнику.",
+    compareSafety: "Сравнить защитные числа", unvouchedTitle: "Неподтверждённое устройство",
   },
 };
 const LANG = (navigator.language || "en").toLowerCase().startsWith("ru") ? "ru" : "en";
@@ -224,7 +230,13 @@ function renderChats() {
       li.dataset.peer = chat.peerId;
       const lines = el("div", "lines");
       const top = el("div", "line");
-      top.append(el("span", "name", chat.name), el("span", "time", rowTime(chat.time)));
+      top.append(el("span", "name", chat.name));
+      if (chat.unvouched) {
+        const warn = el("span", "warn", "!");
+        warn.title = t("unvouchedTitle");
+        top.append(warn);
+      }
+      top.append(el("span", "time", rowTime(chat.time)));
       const bottom = el("div", "line");
       bottom.append(el("span", "preview", chat.preview));
       if (chat.unread > 0) bottom.append(el("span", "badge", chat.unread > 9999 ? "9999+" : String(chat.unread)));
@@ -235,6 +247,18 @@ function renderChats() {
     }),
   );
 }
+
+/** The banner over the open conversation while its account shows an unconfirmed device. */
+function renderAlarm() {
+  const row = state.chats.find((c) => c.peerId === state.open);
+  // The banner takes height from the transcript: a reader at the newest message stays there.
+  const box = $("transcript");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 8;
+  $("alarm").hidden = !row?.unvouched;
+  if (atBottom) box.scrollTop = box.scrollHeight;
+  if (row?.unvouched) $("alarm-text").textContent = t("unvouchedBanner", { name: row.name });
+}
+$("alarm-compare").addEventListener("click", () => openInfo());
 
 function chatName(peerId) {
   return state.chats.find((c) => c.peerId === peerId)?.name ?? `${peerId.slice(0, 8)}…`;
@@ -248,6 +272,7 @@ function openChat(peerId) {
   $("chat").hidden = false;
   $("chat-avatar").replaceChildren(avatar(peerId, true));
   $("chat-name").textContent = chatName(peerId);
+  renderAlarm();
   renderTranscript();
   invoke("open_chat", { peerId });
   renderChats();
@@ -545,7 +570,10 @@ function onEvent(e) {
     case "chats":
       state.chats = e.chats;
       renderChats();
-      if (state.open) $("chat-name").textContent = chatName(state.open);
+      if (state.open) {
+        $("chat-name").textContent = chatName(state.open);
+        renderAlarm();
+      }
       break;
     case "history":
       state.messages.set(e.peerId, e.messages);
@@ -589,6 +617,7 @@ function onEvent(e) {
         toast(e.error ?? "", true);
       }
       break;
+    case "unvouched": toast(t("unvouchedToast", { name: chatName(e.peerId) }), true); break;
     case "notice": toast(e.text, e.error); break;
   }
 }

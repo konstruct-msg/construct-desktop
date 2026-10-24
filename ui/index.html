@@ -92,6 +92,10 @@
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>
           </button>
         </header>
+        <div id="alarm" class="alarm" role="alert" hidden>
+          <span id="alarm-text"></span>
+          <button type="button" class="link" id="alarm-compare" data-t="compareSafety"></button>
+        </div>
         <div id="transcript" class="transcript" tabindex="-1"></div>
         <form id="composer" class="composer">
           <textarea id="draft" rows="1" data-tp="messagePlaceholder"></textarea>
