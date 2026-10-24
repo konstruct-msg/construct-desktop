@@ -83,6 +83,65 @@ fn delete_message(message_id: String, intents: State<Intents>) {
     intents.send(Intent::DeleteMessage(message_id));
 }
 
+/// A file the person chose: its bytes as the body, the chat, its name and caption as
+/// percent-encoded headers.
+#[tauri::command]
+fn send_file(request: tauri::ipc::Request<'_>, intents: State<Intents>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("no file".into());
+    };
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(percent_decode)
+            .unwrap_or_default()
+    };
+    let peer_id = header("x-peer");
+    if peer_id.is_empty() {
+        return Err("no chat".into());
+    }
+    intents.send(Intent::SendFile {
+        peer_id,
+        name: header("x-name"),
+        bytes: bytes.clone(),
+        caption: header("x-caption"),
+    });
+    Ok(())
+}
+
+/// `encodeURIComponent` undone. Bytes that do not decode are kept as they came.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16);
+        match (bytes[i], bytes.get(i + 1), bytes.get(i + 2)) {
+            (b'%', Some(&h), Some(&l)) if hex(h).is_some() && hex(l).is_some() => {
+                out.push((hex(h).unwrap() * 16 + hex(l).unwrap()) as u8);
+                i += 3;
+            }
+            (b, ..) => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[tauri::command]
+fn load_media(message_id: String, index: usize, intents: State<Intents>) {
+    intents.send(Intent::LoadMedia { message_id, index });
+}
+
+#[tauri::command]
+fn save_media(message_id: String, index: usize, intents: State<Intents>) {
+    intents.send(Intent::SaveMedia { message_id, index });
+}
+
 #[tauri::command]
 fn find_contact(query: String, intents: State<Intents>) {
     intents.send(Intent::Find(query));
@@ -134,9 +193,23 @@ fn enter_recovery_phrase(phrase: String, intents: State<Intents>) {
 /// Where the logs are written.
 struct LogDir(std::path::PathBuf);
 
+/// Where saved attachments go.
+struct Downloads(std::path::PathBuf);
+
 /// Open the log folder in the system's file manager.
 #[tauri::command]
 fn open_logs(dir: State<LogDir>) -> Result<(), String> {
+    open_folder(&dir.0)
+}
+
+/// Open the folder saved attachments go to. The folder, never a file in it: a file from the
+/// network is not handed to whatever the system would run it with.
+#[tauri::command]
+fn open_downloads(dir: State<Downloads>) -> Result<(), String> {
+    open_folder(&dir.0)
+}
+
+fn open_folder(dir: &std::path::Path) -> Result<(), String> {
     let opener = if cfg!(target_os = "macos") {
         "open"
     } else if cfg!(target_os = "windows") {
@@ -145,7 +218,7 @@ fn open_logs(dir: State<LogDir>) -> Result<(), String> {
         "xdg-open"
     };
     std::process::Command::new(opener)
-        .arg(&dir.0)
+        .arg(dir)
         .spawn()
         .map(drop)
         .map_err(|e| format!("{opener}: {e}"))
@@ -212,6 +285,12 @@ fn main() {
             init_logging(&dir);
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "Konstruct starting");
             app.manage(LogDir(dir));
+            let downloads = app
+                .path()
+                .download_dir()
+                .or_else(|_| app.path().home_dir())
+                .unwrap_or_else(|_| std::env::temp_dir());
+            app.manage(Downloads(downloads.clone()));
             tauri::async_runtime::spawn(bridge::run(
                 construct_client::ClientConfig {
                     server_url: config.server,
@@ -219,6 +298,7 @@ fn main() {
                     no_encrypt: false,
                     pq_active: cfg!(feature = "post-quantum"),
                 },
+                downloads,
                 inbox,
             ));
             Ok(())
@@ -236,6 +316,10 @@ fn main() {
             edit_message,
             react,
             delete_message,
+            send_file,
+            load_media,
+            save_media,
+            open_downloads,
             find_contact,
             add_contact,
             delete_contact,
@@ -250,4 +334,16 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("the Tauri runtime failed to start");
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_file_name_comes_back_as_the_page_encoded_it() {
+        assert_eq!(
+            super::percent_decode("%D0%BE%D1%82%D1%87%D1%91%D1%82%201.pdf"),
+            "отчёт 1.pdf"
+        );
+        assert_eq!(super::percent_decode("50%"), "50%", "a stray % is kept");
+    }
 }
