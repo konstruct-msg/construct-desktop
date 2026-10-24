@@ -146,6 +146,8 @@
   <dialog id="dlg-info" class="sheet">
     <div class="row"><span id="info-avatar"></span><h2 id="info-name" class="headline"></h2></div>
     <p class="mono small dim" id="info-id"></p>
+    <label class="toggle"><input type="checkbox" id="info-share"><span data-t="shareProfile"></span></label>
+    <p class="small dim" data-t="shareProfileHint"></p>
     <h3 class="section" data-t="safetyNumbers"></h3>
     <p class="small" id="info-hint"></p>
     <div id="safety" class="safety mono"></div>
@@ -180,6 +182,18 @@
             <div class="small dim mono" id="set-user"></div>
           </div>
         </div>
+        <div class="photo-row">
+          <button type="button" class="secondary" id="avatar-choose" data-t="choosePhoto"></button>
+          <button type="button" class="link" id="avatar-remove" data-t="removePhoto"></button>
+          <input type="file" id="avatar-file" accept="image/jpeg,image/png,image/webp,image/gif" hidden>
+        </div>
+        <h3 class="section" data-t="displayName"></h3>
+        <form class="row field-row" id="name-form">
+          <input class="field" id="name-input" autocomplete="off" maxlength="50" data-tp="displayNamePlaceholder">
+          <button type="submit" class="secondary" data-t="saveUsername"></button>
+        </form>
+        <p class="small dim" data-t="profileHint"></p>
+        <h3 class="section" data-t="usernameSection"></h3>
         <form class="row field-row" id="username-form">
           <input class="field" id="username-input" autocomplete="off" spellcheck="false" maxlength="21" data-tp="usernamePlaceholder">
           <button type="submit" class="secondary" data-t="saveUsername"></button>

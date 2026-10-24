@@ -123,8 +123,18 @@ pub enum ViewEvent {
         peer_id: String,
         devices: usize,
     },
+    /// A person's picture, as a data URI of the image their profile carried; `None`: none.
+    /// Sent once per change, apart from the chat list, which is redrawn far more often.
+    Avatar {
+        peer_id: String,
+        url: Option<String>,
+    },
     /// The account as the settings screen shows it.
     Settings {
+        /// The name we chose to share; empty when none.
+        display_name: String,
+        /// Our picture, as `Avatar`'s.
+        avatar: Option<String>,
         username: Option<String>,
         devices: Vec<DeviceRow>,
         delivery_receipts: bool,
@@ -180,6 +190,8 @@ pub struct ChatRow {
     pub unread: u32,
     /// A device of this account nobody it trusts vouched for was seen while the app ran.
     pub unvouched: bool,
+    /// We share our profile with them.
+    pub sharing: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -285,6 +297,15 @@ pub enum Intent {
     SetDeliveryReceipts(bool),
     /// Sign out another device; `None`: every other one.
     RevokeDevices(Option<String>),
+    /// Our shared name, picture, or both; `None` keeps the name.
+    SetProfile {
+        display_name: Option<String>,
+        avatar: construct_client::AvatarChange,
+    },
+    ShareProfile {
+        peer_id: String,
+        on: bool,
+    },
     /// Show file `index` of a message.
     LoadMedia {
         message_id: String,
@@ -338,6 +359,8 @@ struct Model {
     notify: Notifications,
     /// The window has the focus: a message in the open chat is then seen, not announced.
     focused: bool,
+    /// People's pictures as data URIs, for a reloaded page.
+    avatars: std::collections::HashMap<String, String>,
 }
 
 /// The person's choice of what a notification of a new message says. Kept by the page with its
@@ -419,6 +442,7 @@ impl Model {
             time: 0,
             unread: 0,
             unvouched: false,
+            sharing: false,
         });
         self.chats.last_mut().expect("just pushed")
     }
@@ -453,6 +477,7 @@ pub async fn run(
         saving: Default::default(),
         notify: Notifications::default(),
         focused: true,
+        avatars: Default::default(),
     };
     model.screen = match construct_client::stored_session_state() {
         SessionState::Encrypted => Screen::Unlock,
@@ -606,6 +631,17 @@ fn handle_intent(
         Intent::SetDiscoverable(on) => client.send(ClientCommand::SetDiscoverable(on)),
         Intent::SetDeliveryReceipts(on) => client.send(ClientCommand::SetDeliveryReceipts(on)),
         Intent::RevokeDevices(id) => client.send(ClientCommand::RevokeDevices(id)),
+        Intent::SetProfile {
+            display_name,
+            avatar,
+        } => client.send(ClientCommand::SetProfile {
+            display_name,
+            avatar,
+        }),
+        Intent::ShareProfile { peer_id, on } => client.send(ClientCommand::ShareProfile {
+            contact_id: peer_id,
+            on,
+        }),
         Intent::LoadMedia { message_id, index } => {
             client.send(ClientCommand::LoadMedia { message_id, index })
         }
@@ -648,6 +684,12 @@ fn snapshot(model: &Model) -> Vec<ViewEvent> {
     events.push(ViewEvent::Recovery {
         state: model.recovery,
     });
+    for (peer_id, url) in &model.avatars {
+        events.push(ViewEvent::Avatar {
+            peer_id: peer_id.clone(),
+            url: Some(url.clone()),
+        });
+    }
     if let Some(code) = &model.link_code {
         events.push(ViewEvent::LinkCode {
             image: qr_image(code),
@@ -679,15 +721,27 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             vec![account]
         }
         ClientEvent::Started(contacts) => {
+            let mut avatars = Vec::new();
             for contact in contacts {
-                model.chat_mut(&contact.user_id).name = contact.display_name;
+                let chat = model.chat_mut(&contact.user_id);
+                chat.name = contact.display_name;
+                chat.sharing = contact.sharing;
+                if let Some(url) = contact.avatar.as_deref().and_then(avatar_uri) {
+                    model.avatars.insert(contact.user_id.clone(), url.clone());
+                    avatars.push(ViewEvent::Avatar {
+                        peer_id: contact.user_id,
+                        url: Some(url),
+                    });
+                }
             }
-            vec![
+            let mut out = vec![
                 screen(model, Screen::Main),
                 ViewEvent::Chats {
                     chats: model.sorted_chats(),
                 },
-            ]
+            ];
+            out.extend(avatars);
+            out
         }
         ClientEvent::NeedsPassphrase => vec![screen(model, Screen::SetPassphrase)],
         ClientEvent::AuthFailed { reason, no_session } => {
@@ -725,6 +779,7 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
                     time: 0,
                     unread: 0,
                     unvouched: false,
+                    sharing: false,
                 })
                 .collect(),
         }],
@@ -865,6 +920,8 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
         }
         ClientEvent::Notice(text) => vec![notice(text, false)],
         ClientEvent::Settings(s) => vec![ViewEvent::Settings {
+            display_name: s.display_name,
+            avatar: s.avatar.as_deref().and_then(avatar_uri),
             username: s.username,
             devices: s
                 .devices
@@ -934,6 +991,25 @@ fn on_bridge_event(event: BridgeEvent, model: &mut Model) -> Vec<ViewEvent> {
             message_id,
         }],
         BridgeEvent::MessageDelivered { message_id } => vec![ViewEvent::Delivered { message_id }],
+        BridgeEvent::ContactUpdated { contact } => {
+            let chat = model.chat_mut(&contact.user_id);
+            chat.name = contact.display_name;
+            chat.sharing = contact.sharing;
+            let url = contact.avatar.as_deref().and_then(avatar_uri);
+            match &url {
+                Some(url) => model.avatars.insert(contact.user_id.clone(), url.clone()),
+                None => model.avatars.remove(&contact.user_id),
+            };
+            vec![
+                ViewEvent::Chats {
+                    chats: model.sorted_chats(),
+                },
+                ViewEvent::Avatar {
+                    url,
+                    peer_id: contact.user_id,
+                },
+            ]
+        }
         BridgeEvent::StreamStatus { connected } => {
             model.connected = connected;
             vec![ViewEvent::Connection { connected }]
@@ -1009,6 +1085,19 @@ fn media_row(m: MediaInfo) -> MediaRow {
         height: m.height,
         duration_ms: m.duration_ms,
     }
+}
+
+/// A profile picture as the page shows it: a data URI, only of a JPEG or PNG by its bytes, the
+/// zeros it was padded with on the wire cut off.
+fn avatar_uri(bytes: &[u8]) -> Option<String> {
+    use base64::Engine;
+    let mime = sniff(bytes, "")?;
+    if !mime.starts_with("image/") {
+        return None;
+    }
+    let end = bytes.iter().rposition(|b| *b != 0).map_or(0, |i| i + 1);
+    let body = base64::engine::general_purpose::STANDARD.encode(&bytes[..end]);
+    Some(format!("data:{mime};base64,{body}"))
 }
 
 /// Larger than this, a file is saved rather than put in the page.
@@ -1189,6 +1278,7 @@ mod tests {
             saving: Default::default(),
             notify: Notifications::default(),
             focused: true,
+            avatars: Default::default(),
         }
     }
 
@@ -1484,5 +1574,22 @@ mod tests {
             None,
             "our own"
         );
+    }
+
+    #[test]
+    fn a_picture_reaches_the_page_only_as_an_image_without_its_padding() {
+        use base64::Engine;
+        let mut padded = vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 0xFF, 0xD9];
+        padded.resize(1000, 0);
+        let uri = avatar_uri(&padded).unwrap();
+        let body = uri.strip_prefix("data:image/jpeg;base64,").unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(body)
+            .unwrap();
+        assert_eq!(bytes, &padded[..8]);
+        let mut sound = b"\0\0\0\x20ftypM4A ".to_vec();
+        sound.resize(64, 1);
+        assert_eq!(avatar_uri(&sound), None, "a sound is no picture");
+        assert_eq!(avatar_uri(b"<svg onload=x>"), None);
     }
 }
