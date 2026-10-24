@@ -48,6 +48,25 @@ const WORDS = {
     quizWrong: "Those words don't match. Look at your copy again.", copyConfirmed: "Copy confirmed",
     enterHint: "The twelve words, in order, separated by spaces.", save: "Save", phraseAccepted: "Phrase accepted",
     about: "About", version: "Version", logs: "Logs", openLogs: "Open logs folder",
+    connectionLabel: "Connection", fingerprint: "Key fingerprint", clickToCopy: "Click to copy",
+    fingerprintHint: "Your identity key, short. Someone who reads the same digits on their side has your key.",
+    dangerZone: "Danger zone", signOutEverywhere: "Sign out everywhere",
+    confirmSignOutEverywhere: "Sign out every device and erase this one? Click again",
+    signOutEverywhereHint: "Every other device of the account is signed out, then this one is erased. The server keeps the account's first device signed in.",
+    deleteAccount: "Delete account",
+    deleteAccountWarning: "The account is deleted on the server: your username, your devices, the messages waiting for you. Then this device is erased. Your contacts keep the chats they have. This cannot be undone.",
+    deletingIn: "Deleting in {n}… Cancel", deleting: "Deleting…", deleteFailed: "The account was not deleted: {reason}",
+    deleteLocally: "Erase only this device", confirmDeleteLocally: "Erase this device, leave the account? Click again",
+    dataAndStorage: "Data and storage", mediaCache: "Media cache",
+    cacheUsage: "{size} in {n} files", cacheUsageOf: "{size} of {limit} in {n} files",
+    clearCache: "Clear media cache", confirmClearCache: "Delete every file? Click again",
+    clearCacheHint: "Files are fetched again when shown, while the server still holds them: a week from upload. Older ones are gone for good.",
+    autoDownload: "Fetch on arrival", autoNever: "Never", autoSmall: "Up to 16 MB", autoAlways: "Always",
+    autoDownloadHint: "The server keeps a file a week from upload. A file not fetched on arrival may be gone when you open its chat.",
+    cacheLimit: "Cache limit", noLimit: "No limit",
+    cacheLimitHint: "Over the limit, only files the server may still hold are deleted; files fetched over a week ago stay.",
+    keepMedia: "Keep files", keepForever: "Always", keep7: "7 days", keep30: "30 days", keep90: "90 days",
+    keepMediaHint: "Files fetched longer ago are deleted, the only copies too.",
     unvouchedToast: "{name} has a device none of their other devices confirmed. Open the chat to verify.",
     unvouchedBanner: "{name} has a device none of their other devices confirmed. It may be theirs, or someone else's.",
     compareSafety: "Compare safety numbers", unvouchedTitle: "Unconfirmed device",
@@ -134,6 +153,25 @@ const WORDS = {
     quizWrong: "Слова не совпадают. Сверьтесь с записью.", copyConfirmed: "Копия подтверждена",
     enterHint: "Двенадцать слов по порядку через пробел.", save: "Сохранить", phraseAccepted: "Фраза принята",
     about: "О приложении", version: "Версия", logs: "Логи", openLogs: "Открыть папку с логами",
+    connectionLabel: "Соединение", fingerprint: "Отпечаток ключа", clickToCopy: "Нажмите, чтобы скопировать",
+    fingerprintHint: "Ваш ключ личности, коротко. Если у собеседника те же цифры, у него ваш ключ.",
+    dangerZone: "Опасная зона", signOutEverywhere: "Выйти на всех устройствах",
+    confirmSignOutEverywhere: "Выйти везде и стереть это устройство? Нажмите ещё раз",
+    signOutEverywhereHint: "Все остальные устройства аккаунта отключаются, затем это устройство стирается. Первое устройство аккаунта сервер оставляет подключённым.",
+    deleteAccount: "Удалить аккаунт",
+    deleteAccountWarning: "Аккаунт удаляется на сервере: имя пользователя, устройства, ждущие вас сообщения. Затем это устройство стирается. У собеседников переписка остаётся. Отменить нельзя.",
+    deletingIn: "Удаление через {n}… Отменить", deleting: "Удаляю…", deleteFailed: "Аккаунт не удалён: {reason}",
+    deleteLocally: "Стереть только это устройство", confirmDeleteLocally: "Стереть устройство, оставив аккаунт? Нажмите ещё раз",
+    dataAndStorage: "Данные и память", mediaCache: "Кэш медиа",
+    cacheUsage: "{size}, файлов: {n}", cacheUsageOf: "{size} из {limit}, файлов: {n}",
+    clearCache: "Очистить кэш медиа", confirmClearCache: "Удалить все файлы? Нажмите ещё раз",
+    clearCacheHint: "Файлы скачаются снова при показе, пока они есть на сервере: неделю с момента отправки. Более старые пропадут насовсем.",
+    autoDownload: "Скачивать при получении", autoNever: "Никогда", autoSmall: "До 16 МБ", autoAlways: "Всегда",
+    autoDownloadHint: "Сервер хранит файл неделю с момента отправки. Файл, не скачанный сразу, может пропасть к тому времени, как вы откроете чат.",
+    cacheLimit: "Предел кэша", noLimit: "Без предела",
+    cacheLimitHint: "Сверх предела удаляются только файлы, которые ещё могут быть на сервере; скачанные больше недели назад остаются.",
+    keepMedia: "Хранить файлы", keepForever: "Всегда", keep7: "7 дней", keep30: "30 дней", keep90: "90 дней",
+    keepMediaHint: "Файлы, скачанные раньше, удаляются, в том числе единственные копии.",
     unvouchedToast: "У {name} появилось устройство, которое не подтвердило ни одно другое устройство этого аккаунта. Откройте чат, чтобы проверить.",
     unvouchedBanner: "У {name} появилось устройство, которое не подтвердило ни одно другое устройство этого аккаунта. Возможно, оно не принадлежит собеседнику.",
     compareSafety: "Сравнить защитные числа", unvouchedTitle: "Неподтверждённое устройство",
@@ -317,6 +355,7 @@ const state = {
   filter: "",
   invite: null,
   settings: null, // the account's settings as the client last sent them
+  connected: false,
   avatars: new Map(), // peerId → data URI of the picture their profile carried
   link: null,
 };
@@ -334,7 +373,13 @@ function showScreen(screen) {
     $("passphrase").value = "";
     $("passphrase").focus();
   }
-  if (screen === "onboarding") $("alias").focus();
+  if (screen === "onboarding") {
+    // Signed out or deleted: what was open belonged to the account.
+    resetDelete();
+    for (const d of document.querySelectorAll("dialog[open]")) d.close();
+    state.settings = null;
+    $("alias").focus();
+  }
   if (screen === "link") {
     $("link-qr").hidden = true;
     $("link-wait").hidden = false;
@@ -978,6 +1023,8 @@ function openSettings(pane = "profile") {
   $("set-device").textContent = state.account?.deviceId ?? "";
   $("set-server").textContent = state.account?.server ?? "";
   $("set-version").textContent = state.account?.version ?? "";
+  $("set-account-id").textContent = state.account?.userId ?? "";
+  renderConnection();
 
   invoke("logs_path").then((path) => ($("set-logs").textContent = path)).catch(() => {});
   renderRecovery();
@@ -1052,6 +1099,8 @@ function renderAccountSettings() {
   if (s && document.activeElement !== $("device-name-input")) $("device-name-input").value = s.deviceName;
   $("set-receipts").checked = s ? s.deliveryReceipts : true;
   $("set-receipts").disabled = !s;
+  $("set-fingerprint").textContent = s?.fingerprint ?? "";
+  renderStorage();
 
   const list = $("set-devices");
   if (!s) return list.replaceChildren(el("li", "dim", t("loadingDevices")));
@@ -1159,6 +1208,124 @@ $("sign-out").addEventListener("click", (ev) =>
     invoke("logout");
   }),
 );
+
+// ── Data and storage ────────────────────────────────────────────────────────
+
+function bytes(n) {
+  const units = LANG === "ru" ? ["Б", "КБ", "МБ", "ГБ"] : ["B", "KB", "MB", "GB"];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${i && n < 10 && n % 1 ? n.toFixed(1) : Math.round(n)} ${units[i]}`;
+}
+
+function renderStorage() {
+  const s = state.settings;
+  $("cache-clear").disabled = !s || !s.mediaFiles;
+  if (!s) return ($("cache-usage").textContent = "");
+  const limit = s.cacheLimit;
+  $("cache-usage").textContent = limit
+    ? t("cacheUsageOf", { size: bytes(s.mediaBytes), limit: bytes(limit), n: s.mediaFiles })
+    : t("cacheUsage", { size: bytes(s.mediaBytes), n: s.mediaFiles });
+  const fraction = limit ? Math.min(s.mediaBytes / limit, 1) : 0;
+  $("cache-meter").hidden = !limit;
+  $("cache-meter").firstElementChild.style.width = `${(fraction * 100).toFixed(1)}%`;
+  $("cache-meter").classList.toggle("full", fraction >= 0.85);
+  const chosen = { autoDownload: s.autoDownload, cacheLimit: String(limit ?? 0), keepDays: String(s.keepDays ?? 0) };
+  for (const group of document.querySelectorAll("[data-media]")) {
+    for (const b of group.querySelectorAll("[data-value]")) {
+      b.setAttribute("aria-selected", String(b.dataset.value === chosen[group.dataset.media]));
+    }
+  }
+}
+
+for (const b of document.querySelectorAll("[data-bytes]")) b.textContent = bytes(Number(b.dataset.value));
+for (const group of document.querySelectorAll("[data-media]")) {
+  group.addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-value]");
+    const s = state.settings;
+    if (!b || !s) return;
+    const prefs = { autoDownload: s.autoDownload, cacheLimit: s.cacheLimit ?? 0, keepDays: s.keepDays ?? 0 };
+    const key = group.dataset.media;
+    prefs[key] = key === "autoDownload" ? b.dataset.value : Number(b.dataset.value);
+    invoke("set_media_prefs", prefs);
+  });
+}
+$("cache-clear").addEventListener("click", (ev) =>
+  confirmTwice(ev.currentTarget, "confirmClearCache", () => invoke("clear_media_cache")));
+
+for (const id of ["set-account-id", "set-fingerprint"]) {
+  $(id).addEventListener("click", async (ev) => {
+    const text = ev.currentTarget.textContent;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(t("copied"));
+    } catch {}
+  });
+}
+
+function renderConnection() {
+  $("set-connection").textContent = t(state.connected ? "online" : "offline");
+}
+
+// ── Leaving: everywhere, or with the account ────────────────────────────────
+
+$("sign-out-everywhere").addEventListener("click", (ev) =>
+  confirmTwice(ev.currentTarget, "confirmSignOutEverywhere", () => {
+    $("dlg-settings").close();
+    invoke("logout_everywhere");
+  }),
+);
+
+// iOS gives a few seconds to stop a deletion once asked for.
+const DELETE_COUNTDOWN = 5;
+let deleteTimer = null;
+function resetDelete() {
+  clearInterval(deleteTimer);
+  deleteTimer = null;
+  $("delete-go").disabled = false;
+  $("delete-go").textContent = t("deleteAccount");
+  $("delete-cancel").disabled = false;
+}
+$("delete-account").addEventListener("click", () => {
+  resetDelete();
+  $("delete-error").hidden = true;
+  $("delete-local").hidden = true;
+  $("dlg-delete").showModal();
+});
+$("delete-go").addEventListener("click", () => {
+  if (deleteTimer) return resetDelete();
+  let left = DELETE_COUNTDOWN;
+  $("delete-go").textContent = t("deletingIn", { n: left });
+  deleteTimer = setInterval(() => {
+    left -= 1;
+    if (left > 0) return ($("delete-go").textContent = t("deletingIn", { n: left }));
+    clearInterval(deleteTimer);
+    deleteTimer = null;
+    $("delete-go").textContent = t("deleting");
+    $("delete-go").disabled = true;
+    $("delete-cancel").disabled = true;
+    $("delete-error").hidden = true;
+    invoke("delete_account", { localOnly: false });
+  }, 1000);
+});
+$("delete-cancel").addEventListener("click", () => {
+  resetDelete();
+  $("dlg-delete").close();
+});
+$("dlg-delete").addEventListener("cancel", (ev) => {
+  if ($("delete-cancel").disabled) ev.preventDefault();
+  else resetDelete();
+});
+$("delete-local").addEventListener("click", (ev) =>
+  confirmTwice(ev.currentTarget, "confirmDeleteLocally", () => invoke("delete_account", { localOnly: true })));
+
+function onDeleteFailed(reason) {
+  resetDelete();
+  $("delete-error").textContent = t("deleteFailed", { reason });
+  $("delete-error").hidden = false;
+  $("delete-local").hidden = false;
+}
 
 $("open-logs").addEventListener("click", () => invoke("open_logs").catch((e) => toast(String(e), true)));
 
@@ -1354,10 +1521,13 @@ function onEvent(e) {
     case "mediaSaved": onMediaSaved(e); break;
     case "connection": {
       const dot = $("connection");
+      state.connected = e.connected;
       dot.classList.toggle("online", e.connected);
       dot.title = t(e.connected ? "online" : "offline");
+      renderConnection();
       break;
     }
+    case "deleteFailed": onDeleteFailed(e.reason); break;
     case "registrationStep": setRegistration(e.done, e.total, e.label); break;
     case "linkCode":
       $("link-qr").src = e.image;
