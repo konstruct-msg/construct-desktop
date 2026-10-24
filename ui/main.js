@@ -59,6 +59,10 @@ const WORDS = {
     attachment_file: "File", attachment_voice: "Voice message", attachment_sticker: "Sticker",
     attachment_location: "Location", attachment_contact: "Contact", attachment_poll: "Poll",
     attachment_other: "Attachment", attachmentHint: "Not shown here yet — open it on your phone.",
+    save: "Save", saved: "Saved to Downloads: {name}. Click to show the folder.",
+    loading: "Loading…", mediaFailed: "Did not load: {reason}", retry: "Try again",
+    play: "Play", close: "Close", attach: "Attach a file", sending: "Sending {name}…",
+    tooLarge: "{name} is larger than 95 MB and cannot be sent",
   },
   ru: {
     appTitle: "КОНСТРУКТ", starting: "Открываю…",
@@ -109,6 +113,10 @@ const WORDS = {
     attachment_file: "Файл", attachment_voice: "Голосовое сообщение", attachment_sticker: "Стикер",
     attachment_location: "Геопозиция", attachment_contact: "Контакт", attachment_poll: "Опрос",
     attachment_other: "Вложение", attachmentHint: "Здесь пока не показывается — откройте на телефоне.",
+    save: "Сохранить", saved: "Сохранено в «Загрузки»: {name}. Нажмите, чтобы открыть папку.",
+    loading: "Загрузка…", mediaFailed: "Не загрузилось: {reason}", retry: "Повторить",
+    play: "Воспроизвести", close: "Закрыть", attach: "Прикрепить файл", sending: "Отправляется {name}…",
+    tooLarge: "{name} больше 95 МБ — такой файл не отправить",
   },
 };
 const LANG = (navigator.language || "en").toLowerCase().startsWith("ru") ? "ru" : "en";
@@ -204,9 +212,12 @@ function rowTime(ms) {
 }
 
 let toastTimer;
-function toast(text, error = false) {
+// `action`: what a click on it does, if anything.
+function toast(text, error = false, action = null) {
   const node = $("toast");
   node.textContent = text;
+  node.onclick = action;
+  node.classList.toggle("action", Boolean(action));
   node.classList.toggle("error", error);
   node.hidden = false;
   clearTimeout(toastTimer);
@@ -368,7 +379,8 @@ function messageNode(m, previous) {
     quote.addEventListener("click", () => scrollToMessage(m.quote.id));
     bubble.append(quote);
   }
-  if (m.attachment) {
+  m.media.forEach((item, index) => bubble.append(mediaNode(m, item, index)));
+  if (m.attachment && m.media.length === 0) {
     const chip = el("div", "attachment");
     chip.append(el("span", "kind", `📎 ${t(`attachment_${m.attachment}`)}`), el("span", "hint", t("attachmentHint")));
     bubble.append(chip);
@@ -411,6 +423,149 @@ function messageNode(m, previous) {
     invoke("react", { messageId: m.id, emoji: "❤️" });
   });
   return wrap;
+}
+
+// ── Attachments ─────────────────────────────────────────────────────────────
+// A file is fetched and opened by the client; the page gets a picture or a sound as a data URI,
+// or nothing — anything else is saved to disk, never put in the page.
+
+const media = new Map(); // "messageId:index" → {loading} | {url} | {url: null} | {error}
+const mediaKey = (id, index) => `${id}:${index}`;
+
+function loadMedia(m, index) {
+  const key = mediaKey(m.id, index);
+  if (media.has(key) && !media.get(key).error) return;
+  media.set(key, { loading: true });
+  invoke("load_media", { messageId: m.id, index });
+}
+
+// Asked again from the start: a failed fetch, tried once more.
+function reloadMedia(m, index) {
+  media.delete(mediaKey(m.id, index));
+  loadMedia(m, index);
+  redrawMedia(m.id, index);
+}
+
+function saveMedia(m, index) {
+  invoke("save_media", { messageId: m.id, index });
+}
+
+function onMedia(e) {
+  media.set(mediaKey(e.messageId, e.index), e.error ? { error: e.error } : { url: e.url ?? null });
+  redrawMedia(e.messageId, e.index, true);
+}
+
+function redrawMedia(messageId, index, play = false) {
+  const m = (state.messages.get(state.open) ?? []).find((x) => x.id === messageId);
+  if (!m) return;
+  for (const node of $("transcript").querySelectorAll(".media")) {
+    if (node.dataset.key === mediaKey(messageId, index)) node.replaceWith(mediaNode(m, m.media[index], index, play));
+  }
+}
+
+function fileSize(bytes) {
+  if (!bytes) return "";
+  const units = LANG === "ru" ? ["Б", "КБ", "МБ", "ГБ"] : ["B", "KB", "MB", "GB"];
+  let n = bytes, u = 0;
+  while (n >= 1024 && u < units.length - 1) { n /= 1024; u++; }
+  return `${n < 10 && u > 0 ? n.toFixed(1) : Math.round(n)} ${units[u]}`;
+}
+
+function duration(ms) {
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function mediaNode(m, item, index, play = false) {
+  const key = mediaKey(m.id, index);
+  const entry = media.get(key);
+  const node = el("div", `media ${item.kind}`);
+  node.dataset.key = key;
+  const picture = item.kind === "photo" || item.kind === "sticker";
+  const sound = item.kind === "voice" || item.kind === "audio";
+
+  if (picture && entry?.url) {
+    const img = el("img");
+    img.src = entry.url;
+    img.alt = t(`attachment_${item.kind}`);
+    img.addEventListener("click", () => openViewer(m, index, entry.url));
+    node.append(img);
+    return node;
+  }
+  if (sound && entry?.url) {
+    const audio = el("audio");
+    audio.controls = true;
+    audio.src = entry.url;
+    if (play) audio.play().catch(() => {});
+    node.append(audio);
+    return node;
+  }
+  if (picture && !entry) loadMedia(m, index);
+  if (picture && (!entry || entry.loading)) {
+    const box = el("div", "placeholder", t("loading"));
+    if (item.width && item.height) {
+      const w = Math.min(280, item.width);
+      box.style.width = `${w}px`;
+      box.style.aspectRatio = `${item.width} / ${item.height}`;
+    }
+    node.append(box);
+    return node;
+  }
+
+  // A file, a sound not played yet, a picture the page cannot show, or one that failed.
+  const icon = sound ? "▶" : item.kind === "video" ? "🎬" : picture ? "🖼" : "📄";
+  const name = item.name || t(`attachment_${item.kind}`);
+  const details = [sound && item.durationMs ? duration(item.durationMs) : "", fileSize(item.size)]
+    .filter(Boolean).join(" · ");
+  const row = el("div", "file");
+  const lead = el("button", "file-icon", icon);
+  lead.type = "button";
+  lead.setAttribute("aria-label", sound ? t("play") : t("save"));
+  // A sound plays here once fetched, unless the page could not play it (`url: null`): then saved.
+  const playable = sound && entry?.url !== null;
+  lead.addEventListener("click", () => {
+    if (!playable) return saveMedia(m, index);
+    if (entry?.error) return reloadMedia(m, index);
+    loadMedia(m, index);
+    redrawMedia(m.id, index);
+  });
+  const label = el("div", "file-label");
+  label.append(el("span", "file-name", name));
+  if (entry?.loading) label.append(el("span", "file-details", t("loading")));
+  else if (entry?.error) label.append(el("span", "file-details error", t("mediaFailed", { reason: entry.error })));
+  else if (details) label.append(el("span", "file-details", details));
+  const save = el("button", "link", entry?.error ? t("retry") : t("save"));
+  save.type = "button";
+  save.addEventListener("click", () => (entry?.error ? reloadMedia(m, index) : saveMedia(m, index)));
+  row.append(lead, label, save);
+  node.append(row);
+  return node;
+}
+
+function openViewer(m, index, url) {
+  const overlay = el("div", "viewer");
+  overlay.tabIndex = -1;
+  const img = el("img");
+  img.src = url;
+  const bar = el("div", "viewer-bar");
+  const save = el("button", "secondary", t("save"));
+  save.type = "button";
+  save.addEventListener("click", (ev) => { ev.stopPropagation(); saveMedia(m, index); });
+  const close = el("button", "secondary", t("close"));
+  close.type = "button";
+  bar.append(save, close);
+  overlay.append(img, bar);
+  const done = () => overlay.remove();
+  overlay.addEventListener("click", (ev) => { if (ev.target !== img) done(); });
+  overlay.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); done(); }
+  });
+  document.body.append(overlay);
+  overlay.focus();
+}
+
+function onMediaSaved(e) {
+  toast(t("saved", { name: e.name }), false, () => invoke("open_downloads").catch((err) => toast(String(err), true)));
 }
 
 function scrollToMessage(id) {
@@ -561,6 +716,31 @@ function sendDraft() {
   draft.value = "";
   fitDraft();
 }
+// A file goes to Rust as raw bytes, its name and caption in headers; the client prepares it (a
+// photo loses its metadata there), seals and uploads it. The draft, if any, is its caption.
+const MAX_FILE_BYTES = 95 * 1024 * 1024;
+async function sendFile(file) {
+  if (!state.open) return;
+  if (file.size > MAX_FILE_BYTES) return toast(t("tooLarge", { name: file.name }), true);
+  const caption = state.compose?.mode === "edit" ? "" : draft.value.trim();
+  if (caption) { draft.value = ""; fitDraft(); }
+  toast(t("sending", { name: file.name }));
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  invoke("send_file", bytes, {
+    headers: {
+      "x-peer": state.open,
+      "x-name": encodeURIComponent(file.name),
+      "x-caption": encodeURIComponent(caption),
+    },
+  }).catch((e) => toast(String(e), true));
+}
+$("attach").addEventListener("click", () => $("attach-file").click());
+$("attach-file").addEventListener("change", (ev) => {
+  const [file] = ev.target.files;
+  ev.target.value = "";
+  if (file) sendFile(file);
+});
+
 draft.addEventListener("input", fitDraft);
 draft.addEventListener("keydown", (ev) => {
   if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229) {
@@ -890,6 +1070,8 @@ function onEvent(e) {
     case "messageChanged": replaceMessage(e.peerId, e.message); break;
     case "messageDeleted": removeMessage(e.peerId, e.messageId); break;
     case "delivered": markDelivered(e.messageId); break;
+    case "media": onMedia(e); break;
+    case "mediaSaved": onMediaSaved(e); break;
     case "connection": {
       const dot = $("connection");
       dot.classList.toggle("online", e.connected);

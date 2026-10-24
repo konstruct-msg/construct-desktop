@@ -86,8 +86,13 @@ the window drew the TUI's screens as a character grid; the owner replaced that w
   and the CSP stays simple.
 - **Shortcuts go by the physical key** (`KeyboardEvent.code`). On a Cyrillic layout the browser
   reports Ctrl+K as Ctrl+л. Russian is the main audience's layout.
-- **The CSP stays strict** (`tauri.conf.json`): only local scripts, no remote origins, images only
-  local or `data:`, and no plugin permissions beyond `core:default`.
+- **The CSP stays strict** (`tauri.conf.json`): only local scripts, no remote origins, images and
+  sounds only local or `data:`, and no plugin permissions beyond `core:default`.
+- **An attachment is shown only as what its bytes are.** The client fetches and opens it; Rust
+  puts it in the page as a `data:` URI only when its first bytes are a picture or a sound
+  (`bridge.rs` `sniff`), never by the type the sender declared. Anything else is saved to the
+  downloads folder, never over a file there, and nothing from the network is opened by the system:
+  a saved file's notice opens the folder.
 
 ## Build & run
 
