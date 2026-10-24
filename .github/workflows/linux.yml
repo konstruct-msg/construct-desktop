@@ -86,9 +86,13 @@ jobs:
         working-directory: construct-desktop
         run: cargo test --workspace
 
+      # target/ comes back from the cache with the previous run's packages in it; without this the
+      # artifact, the smoke test and a release would pick up an older version beside the new one.
       - name: Installers
         working-directory: construct-desktop
-        run: npx --yes @tauri-apps/cli@2 build --bundles deb,rpm,appimage
+        run: |
+          rm -rf target/release/bundle
+          npx --yes @tauri-apps/cli@2 build --bundles deb,rpm,appimage
 
       # The store key in Secret Service: the client's keyring round trip, against a real
       # gnome-keyring in a D-Bus session. Ignored in ordinary runs because it writes to the key store.
