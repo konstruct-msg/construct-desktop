@@ -155,17 +155,60 @@
       <dt data-t="deviceId"></dt><dd class="mono" id="set-device"></dd>
       <dt data-t="server"></dt><dd class="mono" id="set-server"></dd>
     </dl>
+    <h3 class="section" data-t="recoveryKey"></h3>
+    <p id="recovery-status" class="small"></p>
+    <div class="row">
+      <button type="button" class="secondary" id="recovery-show" data-t="makeCopy" hidden></button>
+      <button type="button" class="secondary" id="recovery-enter" data-t="enterPhrase" hidden></button>
+    </div>
     <h3 class="section" data-t="appearance"></h3>
     <div class="row" id="theme-choice">
       <button type="button" class="tab" data-theme-choice="system" data-t="themeSystem"></button>
       <button type="button" class="tab" data-theme-choice="dark" data-t="themeDark"></button>
       <button type="button" class="tab" data-theme-choice="light" data-t="themeLight"></button>
     </div>
+    <h3 class="section" data-t="about"></h3>
+    <dl class="facts">
+      <dt data-t="version"></dt><dd class="mono" id="set-version"></dd>
+      <dt data-t="logs"></dt><dd class="mono small" id="set-logs"></dd>
+    </dl>
+    <div class="row"><button type="button" class="secondary" id="open-logs" data-t="openLogs"></button></div>
     <div class="row end">
       <button type="button" class="danger-link" id="sign-out" data-t="signOut"></button>
       <span class="spacer"></span>
       <button type="button" class="secondary" data-close data-t="close"></button>
     </div>
+  </dialog>
+
+  <!-- Recovery phrase: its copy, or typing it on a device that did not make it -->
+  <dialog id="dlg-recovery" class="sheet">
+    <h2 class="headline" data-t="recoveryKey"></h2>
+    <div class="recovery-pane" data-pane="words">
+      <p class="small" data-t="copyHint"></p>
+      <ol id="recovery-words" class="words mono"></ol>
+      <div class="row end">
+        <button type="button" class="secondary" data-close data-t="later"></button>
+        <button type="button" class="primary" id="recovery-written" data-t="writtenDown"></button>
+      </div>
+    </div>
+    <form class="recovery-pane" data-pane="quiz" id="recovery-quiz" hidden>
+      <p class="small" data-t="quizHint"></p>
+      <div id="recovery-questions" class="questions"></div>
+      <p id="recovery-quiz-error" class="error small" hidden></p>
+      <div class="row end">
+        <button type="button" class="secondary" id="recovery-back" data-t="back"></button>
+        <button type="submit" class="primary" data-t="check"></button>
+      </div>
+    </form>
+    <form class="recovery-pane" data-pane="enter" id="recovery-enter-form" hidden>
+      <p class="small" data-t="enterHint"></p>
+      <textarea id="recovery-phrase" class="field phrase mono" rows="3" spellcheck="false" autocomplete="off"></textarea>
+      <p id="recovery-enter-error" class="error small" hidden></p>
+      <div class="row end">
+        <button type="button" class="secondary" data-close data-t="close"></button>
+        <button type="submit" class="primary" data-t="save"></button>
+      </div>
+    </form>
   </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>

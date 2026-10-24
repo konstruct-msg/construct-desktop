@@ -75,7 +75,9 @@ the window drew the TUI's screens as a character grid; the owner replaced that w
 
 - **The webview sees what is on screen, never the client's secrets.** `ViewEvent` carries names,
   message text, ids, QR images. No key, token, certificate, session or protocol state crosses the
-  IPC boundary, and every intent from the webview is something the client checks.
+  IPC boundary, and every intent from the webview is something the client checks. One exception:
+  the recovery phrase, sent only when the person asks to see it to make its copy, dropped from the
+  page when its dialog closes; the copy is checked in `construct-client`, not in JavaScript.
 - **Nothing from the network becomes markup.** Names and message text go into the page with
   `textContent`. `innerHTML` is used only with the page's own literals (two SVG icons).
 - **No protocol in JavaScript.** `ui/main.js` draws and forwards intents; anything the core or
