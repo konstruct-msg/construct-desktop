@@ -64,6 +64,26 @@ fn send_message(peer_id: String, text: String, intents: State<Intents>) {
 }
 
 #[tauri::command]
+fn reply(peer_id: String, text: String, to: String, intents: State<Intents>) {
+    intents.send(Intent::Reply { peer_id, text, to });
+}
+
+#[tauri::command]
+fn edit_message(message_id: String, text: String, intents: State<Intents>) {
+    intents.send(Intent::Edit { message_id, text });
+}
+
+#[tauri::command]
+fn react(message_id: String, emoji: String, intents: State<Intents>) {
+    intents.send(Intent::React { message_id, emoji });
+}
+
+#[tauri::command]
+fn delete_message(message_id: String, intents: State<Intents>) {
+    intents.send(Intent::DeleteMessage(message_id));
+}
+
+#[tauri::command]
 fn find_contact(query: String, intents: State<Intents>) {
     intents.send(Intent::Find(query));
 }
@@ -212,6 +232,10 @@ fn main() {
             set_passphrase,
             open_chat,
             send_message,
+            reply,
+            edit_message,
+            react,
+            delete_message,
             find_contact,
             add_contact,
             delete_contact,

@@ -8,8 +8,11 @@
 //! (decisions/desktop-web-interface.md).
 
 use construct_client::{
-    ClientCommand, ClientConfig, ClientEvent, ClientHandle, bridge::BridgeEvent,
-    config::SessionState, local_store::StoredMessage, recovery::RecoveryState,
+    ClientCommand, ClientConfig, ClientEvent, ClientHandle,
+    bridge::BridgeEvent,
+    config::SessionState,
+    local_store::{Attachment, StoredMessage},
+    recovery::RecoveryState,
 };
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -55,6 +58,15 @@ pub enum ViewEvent {
     Message {
         peer_id: String,
         message: MessageRow,
+    },
+    /// A message on screen changed: edited, or its reactions. Drawn in place.
+    MessageChanged {
+        peer_id: String,
+        message: MessageRow,
+    },
+    MessageDeleted {
+        peer_id: String,
+        message_id: String,
     },
     Delivered {
         message_id: String,
@@ -149,10 +161,34 @@ pub struct ChatRow {
 #[serde(rename_all = "camelCase")]
 pub struct MessageRow {
     pub id: String,
+    /// The text, or an attachment's caption.
     pub text: String,
     pub sent: bool,
     pub time: i64,
     pub delivered: bool,
+    pub edited: bool,
+    /// The message this one answers.
+    pub quote: Option<QuoteRow>,
+    /// What it carries that this window does not show yet: `photo`, `video`, `audio`, `file`,
+    /// `voice`, `sticker`, `location`, `contact`, `poll`, `other`.
+    pub attachment: Option<&'static str>,
+    pub reactions: Vec<ReactionRow>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuoteRow {
+    pub id: String,
+    pub text: String,
+}
+
+/// One emoji on a message: how many people put it there, and whether we are one of them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReactionRow {
+    pub emoji: String,
+    pub count: usize,
+    pub mine: bool,
 }
 
 /// What the person did in the webview.
@@ -164,9 +200,29 @@ pub enum Intent {
     Unlock(Zeroizing<Vec<u8>>),
     SetPassphrase(Zeroizing<Vec<u8>>),
     OpenChat(String),
-    Send { peer_id: String, text: String },
+    Send {
+        peer_id: String,
+        text: String,
+    },
+    Reply {
+        peer_id: String,
+        text: String,
+        to: String,
+    },
+    Edit {
+        message_id: String,
+        text: String,
+    },
+    React {
+        message_id: String,
+        emoji: String,
+    },
+    DeleteMessage(String),
     Find(String),
-    AddContact { user_id: String, name: String },
+    AddContact {
+        user_id: String,
+        name: String,
+    },
     DeleteContact(String),
     SafetyNumber(String),
     MintInvite,
@@ -195,6 +251,8 @@ struct Model {
     connected: bool,
     link_code: Option<String>,
     recovery: RecoveryView,
+    /// Our account, to tell our reactions from others'.
+    me: String,
 }
 
 impl Model {
@@ -234,6 +292,7 @@ pub async fn run(config: ClientConfig, mut intents: mpsc::UnboundedReceiver<Inte
         connected: false,
         link_code: None,
         recovery: RecoveryView::Unknown,
+        me: String::new(),
     };
     model.screen = match construct_client::stored_session_state() {
         SessionState::Encrypted => Screen::Unlock,
@@ -347,6 +406,28 @@ fn handle_intent(
                 });
             }
         }
+        Intent::Reply { peer_id, text, to } => {
+            let text = text.trim().to_string();
+            if !text.is_empty() {
+                client.send(ClientCommand::Reply {
+                    contact_id: peer_id,
+                    text,
+                    to,
+                });
+            }
+        }
+        Intent::Edit { message_id, text } => {
+            let text = text.trim().to_string();
+            if !text.is_empty() {
+                client.send(ClientCommand::EditMessage { message_id, text });
+            }
+        }
+        Intent::React { message_id, emoji } => {
+            client.send(ClientCommand::React { message_id, emoji })
+        }
+        Intent::DeleteMessage(message_id) => {
+            client.send(ClientCommand::DeleteMessage { message_id })
+        }
         Intent::Find(query) => client.send(ClientCommand::FindContact { query }),
         Intent::AddContact { user_id, name } => client.send(ClientCommand::AddContact {
             user_id,
@@ -401,6 +482,7 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             if info.user_id.is_empty() {
                 return Vec::new();
             }
+            model.me = info.user_id.clone();
             let account = ViewEvent::Account {
                 user_id: info.user_id,
                 device_id: info.device_id,
@@ -480,21 +562,30 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             contact_id,
             message_id,
             text,
+            quote,
         } => {
             let time = now_ms();
+            let row = MessageRow {
+                id: message_id,
+                text,
+                sent: true,
+                time,
+                delivered: false,
+                edited: false,
+                quote: quote.map(|q| QuoteRow {
+                    id: q.message_id,
+                    text: q.preview,
+                }),
+                attachment: None,
+                reactions: Vec::new(),
+            };
             let chat = model.chat_mut(&contact_id);
-            chat.preview = text.clone();
+            chat.preview = preview(&row);
             chat.time = time;
             vec![
                 ViewEvent::Message {
                     peer_id: contact_id,
-                    message: MessageRow {
-                        id: message_id,
-                        text,
-                        sent: true,
-                        time,
-                        delivered: false,
-                    },
+                    message: row,
                 },
                 ViewEvent::Chats {
                     chats: model.sorted_chats(),
@@ -502,18 +593,18 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             ]
         }
         ClientEvent::History { peer_id, messages } => {
+            let me = model.me.clone();
+            let messages: Vec<MessageRow> =
+                messages.into_iter().map(|m| message_row(m, &me)).collect();
             if let Some(last) = messages.last() {
                 let chat = model.chat_mut(&peer_id);
-                if last.timestamp_ms >= chat.time {
-                    chat.preview = last.text.clone();
-                    chat.time = last.timestamp_ms;
+                if last.time >= chat.time {
+                    chat.preview = preview(last);
+                    chat.time = last.time;
                 }
             }
             vec![
-                ViewEvent::History {
-                    peer_id,
-                    messages: messages.into_iter().map(message_row).collect(),
-                },
+                ViewEvent::History { peer_id, messages },
                 ViewEvent::Chats {
                     chats: model.sorted_chats(),
                 },
@@ -575,7 +666,7 @@ fn on_bridge_event(event: BridgeEvent, model: &mut Model) -> Vec<ViewEvent> {
     let incoming = |model: &mut Model, peer_id: String, row: MessageRow| {
         let open = model.open_chat.as_deref() == Some(peer_id.as_str());
         let chat = model.chat_mut(&peer_id);
-        chat.preview = row.text.clone();
+        chat.preview = preview(&row);
         chat.time = row.time;
         if !open && !row.sent {
             chat.unread += 1;
@@ -591,38 +682,22 @@ fn on_bridge_event(event: BridgeEvent, model: &mut Model) -> Vec<ViewEvent> {
         ]
     };
     match event {
-        BridgeEvent::NewMessage {
+        BridgeEvent::NewMessage { message } | BridgeEvent::OwnMessage { message } => {
+            let peer_id = message.peer_id.clone();
+            let row = message_row(message, &model.me);
+            incoming(model, peer_id, row)
+        }
+        BridgeEvent::MessageChanged { message } => vec![ViewEvent::MessageChanged {
+            peer_id: message.peer_id.clone(),
+            message: message_row(message, &model.me),
+        }],
+        BridgeEvent::MessageDeleted {
             peer_id,
             message_id,
-            text,
-            timestamp_ms,
-        } => incoming(
-            model,
-            peer_id,
-            MessageRow {
-                id: message_id,
-                text,
-                sent: false,
-                time: timestamp_ms,
-                delivered: false,
-            },
-        ),
-        BridgeEvent::OwnMessage {
+        } => vec![ViewEvent::MessageDeleted {
             peer_id,
             message_id,
-            text,
-            timestamp_ms,
-        } => incoming(
-            model,
-            peer_id,
-            MessageRow {
-                id: message_id,
-                text,
-                sent: true,
-                time: timestamp_ms,
-                delivered: false,
-            },
-        ),
+        }],
         BridgeEvent::MessageDelivered { message_id } => vec![ViewEvent::Delivered { message_id }],
         BridgeEvent::StreamStatus { connected } => {
             model.connected = connected;
@@ -656,13 +731,60 @@ fn on_bridge_event(event: BridgeEvent, model: &mut Model) -> Vec<ViewEvent> {
     }
 }
 
-fn message_row(m: StoredMessage) -> MessageRow {
+/// A stored message as the transcript draws it; `me` is our account.
+fn message_row(m: StoredMessage, me: &str) -> MessageRow {
+    let mut reactions: Vec<ReactionRow> = Vec::new();
+    for r in &m.reactions {
+        let mine = r.reactor_id == me;
+        match reactions.iter_mut().find(|row| row.emoji == r.emoji) {
+            Some(row) => {
+                row.count += 1;
+                row.mine |= mine;
+            }
+            None => reactions.push(ReactionRow {
+                emoji: r.emoji.clone(),
+                count: 1,
+                mine,
+            }),
+        }
+    }
     MessageRow {
         sent: m.direction == "sent",
         delivered: m.delivery_status == "delivered",
+        edited: m.edited,
+        quote: m.quote.map(|q| QuoteRow {
+            id: q.message_id,
+            text: q.preview,
+        }),
+        attachment: m.attachment.map(attachment_name),
+        reactions,
         id: m.id,
         text: m.text,
         time: m.timestamp_ms,
+    }
+}
+
+fn attachment_name(a: Attachment) -> &'static str {
+    match a {
+        Attachment::Photo => "photo",
+        Attachment::Video => "video",
+        Attachment::Audio => "audio",
+        Attachment::File => "file",
+        Attachment::Voice => "voice",
+        Attachment::Sticker => "sticker",
+        Attachment::Location => "location",
+        Attachment::Contact => "contact",
+        Attachment::Poll => "poll",
+        Attachment::Other => "other",
+    }
+}
+
+/// The chat list's line for a message. An attachment is marked, the window words it.
+fn preview(row: &MessageRow) -> String {
+    match row.attachment {
+        Some(_) if row.text.is_empty() => "📎".into(),
+        Some(_) => format!("📎 {}", row.text),
+        None => row.text.clone(),
     }
 }
 
@@ -728,6 +850,20 @@ mod tests {
             connected: true,
             link_code: None,
             recovery: RecoveryView::Unknown,
+            me: "me".into(),
+        }
+    }
+
+    fn received(peer: &str, id: &str, text: &str, time: i64) -> BridgeEvent {
+        BridgeEvent::NewMessage {
+            message: StoredMessage {
+                id: id.into(),
+                peer_id: peer.into(),
+                text: text.into(),
+                direction: "received".into(),
+                timestamp_ms: time,
+                ..Default::default()
+            },
         }
     }
 
@@ -738,15 +874,7 @@ mod tests {
         m.chat_mut("bob").time = 1;
         m.open_chat = Some("old".into());
 
-        on_bridge_event(
-            BridgeEvent::NewMessage {
-                peer_id: "bob".into(),
-                message_id: "m1".into(),
-                text: "hi".into(),
-                timestamp_ms: 10,
-            },
-            &mut m,
-        );
+        on_bridge_event(received("bob", "m1", "hi", 10), &mut m);
 
         let chats = m.sorted_chats();
         assert_eq!(chats[0].peer_id, "bob");
@@ -758,15 +886,7 @@ mod tests {
     fn a_message_to_the_open_chat_is_not_unread() {
         let mut m = model();
         m.open_chat = Some("bob".into());
-        on_bridge_event(
-            BridgeEvent::NewMessage {
-                peer_id: "bob".into(),
-                message_id: "m1".into(),
-                text: "hi".into(),
-                timestamp_ms: 10,
-            },
-            &mut m,
-        );
+        on_bridge_event(received("bob", "m1", "hi", 10), &mut m);
         assert_eq!(m.chats[0].unread, 0);
     }
 
@@ -827,12 +947,64 @@ mod tests {
                 sent: true,
                 time: 1,
                 delivered: false,
+                edited: false,
+                quote: None,
+                attachment: None,
+                reactions: Vec::new(),
             },
         })
         .unwrap();
         assert_eq!(json["type"], "message");
         assert_eq!(json["peerId"], "bob");
         assert_eq!(json["message"]["sent"], true);
+    }
+
+    #[test]
+    fn reactions_are_counted_by_emoji_and_ours_is_marked() {
+        use construct_client::local_store::StoredReaction;
+        let reaction = |who: &str, emoji: &str| StoredReaction {
+            reactor_id: who.into(),
+            emoji: emoji.into(),
+        };
+        let row = message_row(
+            StoredMessage {
+                reactions: vec![
+                    reaction("bob", "👍"),
+                    reaction("me", "👍"),
+                    reaction("carol", "❤️"),
+                ],
+                ..Default::default()
+            },
+            "me",
+        );
+        assert_eq!(
+            row.reactions,
+            [
+                ReactionRow {
+                    emoji: "👍".into(),
+                    count: 2,
+                    mine: true
+                },
+                ReactionRow {
+                    emoji: "❤️".into(),
+                    count: 1,
+                    mine: false
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn an_attachment_is_marked_in_the_chat_list() {
+        let mut m = model();
+        let mut event = received("bob", "m1", "", 10);
+        if let BridgeEvent::NewMessage { message } = &mut event {
+            message.attachment = Some(Attachment::Photo);
+        }
+        let out = on_bridge_event(event, &mut m);
+        assert_eq!(m.chats[0].preview, "📎");
+        let json = serde_json::to_value(&out[0]).unwrap();
+        assert_eq!(json["message"]["attachment"], "photo");
     }
 
     #[test]

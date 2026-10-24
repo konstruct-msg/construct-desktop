@@ -97,6 +97,12 @@
           <button type="button" class="link" id="alarm-compare" data-t="compareSafety"></button>
         </div>
         <div id="transcript" class="transcript" tabindex="-1"></div>
+        <div id="compose-bar" class="compose-bar" hidden>
+          <div class="compose-what"><span id="compose-label" class="label"></span><span id="compose-text" class="text"></span></div>
+          <button type="button" class="icon" id="compose-cancel" data-tl="cancel">
+            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
         <form id="composer" class="composer">
           <textarea id="draft" rows="1" data-tp="messagePlaceholder"></textarea>
           <button type="submit" class="send" id="send" data-tl="send" disabled>
@@ -106,6 +112,8 @@
       </div>
     </main>
   </section>
+
+  <div id="msg-menu" class="msg-menu" role="menu" hidden></div>
 
   <!-- Add contact -->
   <dialog id="dlg-add" class="sheet">
