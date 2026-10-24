@@ -62,6 +62,18 @@
     </form>
   </section>
 
+  <!-- The app lock: over everything, while the window is locked -->
+  <section id="lock-screen" class="lock-screen centered" hidden>
+    <form class="column" id="lock-form">
+      <div class="wordmark" data-t="appTitle"></div>
+      <p class="dim" data-t="lockHint"></p>
+      <input id="lock-code" type="password" class="field" autocomplete="off">
+      <p id="lock-error" class="error small" hidden></p>
+      <button type="submit" class="primary" data-t="unlock"></button>
+      <button type="button" class="danger-link" id="lock-forgot" data-t="lockForgot"></button>
+    </form>
+  </section>
+
   <!-- Main: chats and the open conversation -->
   <section id="screen-main" class="screen main" hidden>
     <aside class="sidebar">
@@ -277,6 +289,31 @@
         <h3 class="section" data-t="privacy"></h3>
         <label class="toggle"><input type="checkbox" id="set-receipts"><span data-t="deliveryReceipts"></span></label>
         <p class="small dim" data-t="deliveryReceiptsHint"></p>
+        <h3 class="section" data-t="appLock"></h3>
+        <p class="small" id="lock-status"></p>
+        <div class="row choice" id="lock-delay">
+          <button type="button" class="tab" data-value="0" data-t="lockNowDelay"></button>
+          <button type="button" class="tab" data-value="60" data-t="lock1m"></button>
+          <button type="button" class="tab" data-value="300" data-t="lock5m"></button>
+          <button type="button" class="tab" data-value="900" data-t="lock15m"></button>
+          <button type="button" class="tab" data-value="3600" data-t="lock1h"></button>
+        </div>
+        <p class="small dim" data-t="lockDelayHint"></p>
+        <form class="column-form" id="lock-set-form">
+          <input type="password" class="field" id="lock-current" autocomplete="off" data-tp="lockCurrent">
+          <input type="password" class="field" id="lock-new" autocomplete="off" data-tp="lockNew">
+          <input type="password" class="field" id="lock-repeat" autocomplete="off" data-tp="lockRepeat">
+          <div class="row">
+            <button type="submit" class="secondary" id="lock-save"></button>
+            <button type="button" class="secondary" id="lock-now" data-t="lockNow"></button>
+            <button type="button" class="danger-link" id="lock-off" data-t="lockOff"></button>
+          </div>
+        </form>
+        <p class="small dim" data-t="lockScreenHint"></p>
+        <h3 class="section" data-t="issuedInvites"></h3>
+        <ul class="devices" id="set-invites"></ul>
+        <div class="row"><button type="button" class="secondary" id="revoke-invites" data-t="revokeAllInvites"></button></div>
+        <p class="small dim" data-t="issuedInvitesHint"></p>
       </section>
       <section class="settings-pane" data-pane="storage" hidden>
         <h3 class="section" data-t="mediaCache"></h3>
