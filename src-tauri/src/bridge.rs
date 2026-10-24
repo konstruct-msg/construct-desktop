@@ -11,7 +11,8 @@ use construct_client::{
     ClientCommand, ClientConfig, ClientEvent, ClientHandle,
     bridge::BridgeEvent,
     config::SessionState,
-    local_store::{Attachment, StoredMessage},
+    local_store::{Attachment, MediaInfo, StoredMessage},
+    media::OpenedMedia,
     recovery::RecoveryState,
 };
 use serde::Serialize;
@@ -67,6 +68,21 @@ pub enum ViewEvent {
     MessageDeleted {
         peer_id: String,
         message_id: String,
+    },
+    /// File `index` of a message, opened. `url` is a data URI of a picture or a sound the page
+    /// shows; `None` for anything else, which is saved instead. Pictures and sounds are named by
+    /// their bytes, never by what the sender declared.
+    Media {
+        message_id: String,
+        index: usize,
+        url: Option<String>,
+        error: Option<String>,
+    },
+    /// File `index` of a message was saved in the downloads folder under `name`.
+    MediaSaved {
+        message_id: String,
+        index: usize,
+        name: String,
     },
     Delivered {
         message_id: String,
@@ -173,6 +189,21 @@ pub struct MessageRow {
     /// `voice`, `sticker`, `location`, `contact`, `poll`, `other`.
     pub attachment: Option<&'static str>,
     pub reactions: Vec<ReactionRow>,
+    /// The files it carries, fetched one by one by index.
+    pub media: Vec<MediaRow>,
+}
+
+/// A file of a message, before it is fetched: enough to draw its place.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaRow {
+    /// As `attachment`.
+    pub kind: &'static str,
+    pub name: Option<String>,
+    pub size: u64,
+    pub width: u32,
+    pub height: u32,
+    pub duration_ms: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -218,6 +249,23 @@ pub enum Intent {
         emoji: String,
     },
     DeleteMessage(String),
+    /// Send a file the person chose; `caption` goes under it.
+    SendFile {
+        peer_id: String,
+        name: String,
+        bytes: Vec<u8>,
+        caption: String,
+    },
+    /// Show file `index` of a message.
+    LoadMedia {
+        message_id: String,
+        index: usize,
+    },
+    /// Save file `index` of a message in the downloads folder.
+    SaveMedia {
+        message_id: String,
+        index: usize,
+    },
     Find(String),
     AddContact {
         user_id: String,
@@ -253,6 +301,10 @@ struct Model {
     recovery: RecoveryView,
     /// Our account, to tell our reactions from others'.
     me: String,
+    /// Where saved files go.
+    downloads: std::path::PathBuf,
+    /// Files asked for to be saved, not shown: (message, index).
+    saving: std::collections::HashSet<(String, usize)>,
 }
 
 impl Model {
@@ -280,7 +332,11 @@ impl Model {
 }
 
 /// Run the client and the model until the window closes.
-pub async fn run(config: ClientConfig, mut intents: mpsc::UnboundedReceiver<Intent>) {
+pub async fn run(
+    config: ClientConfig,
+    downloads: std::path::PathBuf,
+    mut intents: mpsc::UnboundedReceiver<Intent>,
+) {
     let (event_tx, mut events) = mpsc::unbounded_channel();
     let server = config.server_url.clone();
     let client = construct_client::spawn(config, event_tx);
@@ -293,6 +349,8 @@ pub async fn run(config: ClientConfig, mut intents: mpsc::UnboundedReceiver<Inte
         link_code: None,
         recovery: RecoveryView::Unknown,
         me: String::new(),
+        downloads,
+        saving: Default::default(),
     };
     model.screen = match construct_client::stored_session_state() {
         SessionState::Encrypted => Screen::Unlock,
@@ -427,6 +485,24 @@ fn handle_intent(
         }
         Intent::DeleteMessage(message_id) => {
             client.send(ClientCommand::DeleteMessage { message_id })
+        }
+        Intent::SendFile {
+            peer_id,
+            name,
+            bytes,
+            caption,
+        } => client.send(ClientCommand::SendFile {
+            contact_id: peer_id,
+            name,
+            bytes,
+            caption,
+        }),
+        Intent::LoadMedia { message_id, index } => {
+            client.send(ClientCommand::LoadMedia { message_id, index })
+        }
+        Intent::SaveMedia { message_id, index } => {
+            model.saving.insert((message_id.clone(), index));
+            client.send(ClientCommand::LoadMedia { message_id, index })
         }
         Intent::Find(query) => client.send(ClientCommand::FindContact { query }),
         Intent::AddContact { user_id, name } => client.send(ClientCommand::AddContact {
@@ -578,6 +654,7 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
                 }),
                 attachment: None,
                 reactions: Vec::new(),
+                media: Vec::new(),
             };
             let chat = model.chat_mut(&contact_id);
             chat.preview = preview(&row);
@@ -609,6 +686,35 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
                     chats: model.sorted_chats(),
                 },
             ]
+        }
+        ClientEvent::Media {
+            message_id,
+            index,
+            result,
+        } => {
+            let save = model.saving.remove(&(message_id.clone(), index));
+            vec![match result {
+                Err(reason) => ViewEvent::Media {
+                    message_id,
+                    index,
+                    url: None,
+                    error: Some(reason),
+                },
+                Ok(media) if save => match save_media(&model.downloads, &media) {
+                    Ok(name) => ViewEvent::MediaSaved {
+                        message_id,
+                        index,
+                        name,
+                    },
+                    Err(e) => notice(format!("Not saved: {e}"), true),
+                },
+                Ok(media) => ViewEvent::Media {
+                    message_id,
+                    index,
+                    url: data_uri(&media),
+                    error: None,
+                },
+            }]
         }
         ClientEvent::SafetyNumber { contact_id, number } => vec![ViewEvent::SafetyNumber {
             peer_id: contact_id,
@@ -758,10 +864,105 @@ fn message_row(m: StoredMessage, me: &str) -> MessageRow {
         }),
         attachment: m.attachment.map(attachment_name),
         reactions,
+        media: m.media.into_iter().map(media_row).collect(),
         id: m.id,
         text: m.text,
         time: m.timestamp_ms,
     }
+}
+
+fn media_row(m: MediaInfo) -> MediaRow {
+    MediaRow {
+        kind: attachment_name(m.kind.unwrap_or(Attachment::File)),
+        name: m.filename,
+        size: m.size,
+        width: m.width,
+        height: m.height,
+        duration_ms: m.duration_ms,
+    }
+}
+
+/// Larger than this, a file is saved rather than put in the page.
+const MAX_INLINE_BYTES: usize = 25 * 1024 * 1024;
+
+/// What a file is by its first bytes, among what the page shows: a picture or a sound.
+fn sniff(bytes: &[u8], declared_mime: &str) -> Option<&'static str> {
+    let at = |offset: usize, magic: &[u8]| bytes.get(offset..offset + magic.len()) == Some(magic);
+    if at(0, &[0xFF, 0xD8, 0xFF]) {
+        Some("image/jpeg")
+    } else if at(0, b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if at(0, b"GIF87a") || at(0, b"GIF89a") {
+        Some("image/gif")
+    } else if at(0, b"RIFF") && at(8, b"WEBP") {
+        Some("image/webp")
+    } else if at(0, b"RIFF") && at(8, b"WAVE") {
+        Some("audio/wav")
+    } else if at(0, b"OggS") {
+        Some("audio/ogg")
+    } else if at(0, b"ID3") {
+        Some("audio/mpeg")
+    // A voice note is AAC in an MP4 box, as a video is; the declared type tells them apart, and
+    // calling a video a sound only fails to play it.
+    } else if at(4, b"ftyp") && !declared_mime.starts_with("video/") {
+        Some("audio/mp4")
+    } else {
+        None
+    }
+}
+
+fn data_uri(media: &OpenedMedia) -> Option<String> {
+    use base64::Engine;
+    if media.bytes.len() > MAX_INLINE_BYTES {
+        return None;
+    }
+    let mime = sniff(&media.bytes, &media.mime)?;
+    let body = base64::engine::general_purpose::STANDARD.encode(&media.bytes);
+    Some(format!("data:{mime};base64,{body}"))
+}
+
+/// Write `media` into `dir` under its own name, or a made-up one, never over a file there.
+fn save_media(dir: &std::path::Path, media: &OpenedMedia) -> std::io::Result<String> {
+    use std::io::Write;
+    let name = media.filename.clone().unwrap_or_else(|| {
+        let ext = match sniff(&media.bytes, &media.mime) {
+            Some(mime) => mime.rsplit('/').next().unwrap_or("bin"),
+            None => "bin",
+        };
+        let ext = if ext == "jpeg" {
+            "jpg"
+        } else if ext == "mp4" {
+            "m4a"
+        } else {
+            ext
+        };
+        format!("konstruct-{}.{ext}", now_ms())
+    });
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() => (stem.to_string(), format!(".{ext}")),
+        _ => (name.clone(), String::new()),
+    };
+    std::fs::create_dir_all(dir)?;
+    for n in 0..1000 {
+        let candidate = if n == 0 {
+            name.clone()
+        } else {
+            format!("{stem} ({n}){ext}")
+        };
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(dir.join(&candidate))
+        {
+            Ok(mut file) => {
+                file.write_all(&media.bytes)?;
+                return Ok(candidate);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::other("too many files of that name"))
 }
 
 fn attachment_name(a: Attachment) -> &'static str {
@@ -851,6 +1052,8 @@ mod tests {
             link_code: None,
             recovery: RecoveryView::Unknown,
             me: "me".into(),
+            downloads: std::env::temp_dir(),
+            saving: Default::default(),
         }
     }
 
@@ -951,6 +1154,7 @@ mod tests {
                 quote: None,
                 attachment: None,
                 reactions: Vec::new(),
+                media: Vec::new(),
             },
         })
         .unwrap();
@@ -1012,5 +1216,79 @@ mod tests {
         let image = qr_image("konstruct://link-to-me?id=abc&fp=00");
         assert!(image.starts_with("data:image/svg+xml;utf8,"));
         assert!(!image.contains('<') && !image.contains('#') && !image.contains('"'));
+    }
+
+    fn opened(mime: &str, name: Option<&str>, bytes: &[u8]) -> OpenedMedia {
+        OpenedMedia {
+            mime: mime.into(),
+            filename: name.map(Into::into),
+            bytes: bytes.to_vec(),
+        }
+    }
+
+    #[test]
+    fn a_file_is_shown_by_what_its_bytes_are_not_what_the_sender_said() {
+        let png = b"\x89PNG\r\n\x1a\n....";
+        let uri = data_uri(&opened("text/html", None, png)).unwrap();
+        assert!(uri.starts_with("data:image/png;base64,"), "{uri}");
+        assert_eq!(
+            data_uri(&opened("image/jpeg", None, b"<svg onload=x>")),
+            None
+        );
+        let m4a = b"\0\0\0\x20ftypM4A ....";
+        assert!(
+            data_uri(&opened("audio/m4a", None, m4a))
+                .unwrap()
+                .starts_with("data:audio/mp4;")
+        );
+        assert_eq!(
+            data_uri(&opened("video/mp4", None, m4a)),
+            None,
+            "a video is saved"
+        );
+        let huge = vec![0xFFu8, 0xD8, 0xFF]
+            .into_iter()
+            .chain(std::iter::repeat_n(0, MAX_INLINE_BYTES))
+            .collect::<Vec<_>>();
+        assert_eq!(data_uri(&opened("image/jpeg", None, &huge)), None);
+    }
+
+    #[test]
+    fn a_saved_file_never_replaces_one_there() {
+        let dir = std::env::temp_dir().join(format!("konstruct-save-{}", now_ms()));
+        let media = opened("application/pdf", Some("report.pdf"), b"new");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("report.pdf"), b"mine").unwrap();
+        assert_eq!(save_media(&dir, &media).unwrap(), "report (1).pdf");
+        assert_eq!(save_media(&dir, &media).unwrap(), "report (2).pdf");
+        assert_eq!(std::fs::read(dir.join("report.pdf")).unwrap(), b"mine");
+        assert_eq!(std::fs::read(dir.join("report (1).pdf")).unwrap(), b"new");
+        let unnamed = save_media(&dir, &opened("", None, &[0xFF, 0xD8, 0xFF, 0])).unwrap();
+        assert!(
+            unnamed.starts_with("konstruct-") && unnamed.ends_with(".jpg"),
+            "{unnamed}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_file_asked_to_be_saved_is_not_put_in_the_page() {
+        let dir = std::env::temp_dir().join(format!("konstruct-save-asked-{}", now_ms()));
+        let mut model = model();
+        model.downloads = dir.clone();
+        model.saving.insert(("m".into(), 0));
+        let media = |index| ClientEvent::Media {
+            message_id: "m".into(),
+            index,
+            result: Ok(opened("image/png", Some("p.png"), b"\x89PNG\r\n\x1a\n")),
+        };
+        let out = on_client_event(media(0), &mut model, "");
+        assert!(matches!(&out[..], [ViewEvent::MediaSaved { name, .. }] if name == "p.png"));
+        let out = on_client_event(media(0), &mut model, "");
+        assert!(
+            matches!(&out[..], [ViewEvent::Media { url: Some(_), .. }]),
+            "once only"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
