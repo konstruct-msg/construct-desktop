@@ -168,6 +168,15 @@ pub enum ViewEvent {
         keep_days: Option<u32>,
         invites: Vec<InviteRow>,
     },
+    /// A history transfer by file ended: `exported` (written to `file`) or imported; `error` when
+    /// it did not happen.
+    HistoryTransfer {
+        exported: bool,
+        error: Option<String>,
+        messages: usize,
+        media: usize,
+        file: Option<String>,
+    },
     /// The app lock closed the window: the page drops what it shows and asks for the code.
     Locked,
     /// The code matched; the page is drawn again from what follows.
@@ -396,6 +405,10 @@ pub enum Intent {
     Logout,
     LogoutEverywhere,
     LockNow,
+    /// Write this device's history for `device_id` into the downloads folder.
+    ExportHistory(String),
+    /// A history file the person chose, its bytes.
+    ImportHistory(Vec<u8>),
     RevokeInvites(Vec<String>),
     UnlockApp(Zeroizing<String>),
     SetAppLock {
@@ -448,6 +461,8 @@ struct Model {
     /// People's pictures as data URIs, for a reloaded page.
     avatars: std::collections::HashMap<String, String>,
     lock: Lock,
+    /// The copy of a history file the client is reading.
+    importing: Option<std::path::PathBuf>,
 }
 
 /// The app lock as this window keeps it. While `locked`, the page is sent nothing of the account
@@ -655,6 +670,7 @@ pub async fn run(
         focused: true,
         avatars: Default::default(),
         lock: Lock::default(),
+        importing: None,
     };
     model.screen = match construct_client::stored_session_state() {
         SessionState::Encrypted => Screen::Unlock,
@@ -848,6 +864,24 @@ fn handle_intent(
             }
         }
         Intent::UnlockApp(code) => client.send(ClientCommand::UnlockApp(code)),
+        Intent::ExportHistory(device_id) => {
+            let stem = format!("konstruct-history-{}", &device_id[..8.min(device_id.len())]);
+            match free_path(&model.downloads, &stem, "cthf") {
+                Ok(path) => client.send(ClientCommand::ExportHistory { device_id, path }),
+                Err(e) => send(view, notice(format!("History not written: {e}"), true)),
+            }
+        }
+        Intent::ImportHistory(bytes) => {
+            // Read by the client from a file: written aside, deleted once it is read.
+            let path = std::env::temp_dir().join(format!("konstruct-import-{}.cthf", now_ms()));
+            match std::fs::write(&path, &bytes) {
+                Ok(()) => {
+                    model.importing = Some(path.clone());
+                    client.send(ClientCommand::ImportHistory(path));
+                }
+                Err(e) => send(view, notice(format!("History not imported: {e}"), true)),
+            }
+        }
         Intent::RevokeInvites(jtis) => client.send(ClientCommand::RevokeInvites(jtis)),
         Intent::SetAppLock {
             current,
@@ -1267,6 +1301,31 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
         }
         ClientEvent::AppUnlocked(Err(reason)) => vec![ViewEvent::UnlockFailed { reason }],
         ClientEvent::AppLockRefused(reason) => vec![notice(reason, true)],
+        ClientEvent::HistoryExported(result) => vec![match result {
+            Ok((s, path)) => ViewEvent::HistoryTransfer {
+                exported: true,
+                error: None,
+                messages: s.messages,
+                media: s.media,
+                file: path.file_name().map(|n| n.to_string_lossy().into_owned()),
+            },
+            Err(e) => history_failed(true, e),
+        }],
+        ClientEvent::HistoryImported(result) => {
+            if let Some(path) = model.importing.take() {
+                let _ = std::fs::remove_file(path);
+            }
+            vec![match result {
+                Ok(s) => ViewEvent::HistoryTransfer {
+                    exported: false,
+                    error: None,
+                    messages: s.messages,
+                    media: s.media,
+                    file: None,
+                },
+                Err(e) => history_failed(false, e),
+            }]
+        }
         ClientEvent::Recovery(state) => {
             model.recovery = state.into();
             vec![ViewEvent::Recovery {
@@ -1472,6 +1531,31 @@ fn data_uri(media: &OpenedMedia) -> Option<String> {
 }
 
 /// Write `media` into `dir` under its own name, or a made-up one, never over a file there.
+fn history_failed(exported: bool, error: String) -> ViewEvent {
+    ViewEvent::HistoryTransfer {
+        exported,
+        error: Some(error),
+        messages: 0,
+        media: 0,
+        file: None,
+    }
+}
+
+/// `dir/stem.ext`, or `stem (n).ext` when that is taken.
+fn free_path(dir: &std::path::Path, stem: &str, ext: &str) -> std::io::Result<std::path::PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    (0..1000)
+        .map(|n| {
+            dir.join(if n == 0 {
+                format!("{stem}.{ext}")
+            } else {
+                format!("{stem} ({n}).{ext}")
+            })
+        })
+        .find(|p| !p.exists())
+        .ok_or_else(|| std::io::Error::other("no free name"))
+}
+
 fn save_media(dir: &std::path::Path, media: &OpenedMedia) -> std::io::Result<String> {
     use std::io::Write;
     let name = media.filename.clone().unwrap_or_else(|| {
@@ -1612,6 +1696,7 @@ mod tests {
             focused: true,
             avatars: Default::default(),
             lock: Lock::default(),
+            importing: None,
         }
     }
 
@@ -1734,6 +1819,42 @@ mod tests {
                 .all(|e| !matches!(e, ViewEvent::LinkOffer { .. })),
             "and not kept for a reload"
         );
+    }
+
+    #[test]
+    fn an_imported_history_file_copy_is_deleted_once_read() {
+        let mut model = model();
+        let copy = std::env::temp_dir().join(format!("konstruct-import-test-{}.cthf", now_ms()));
+        std::fs::write(&copy, b"sealed").unwrap();
+        model.importing = Some(copy.clone());
+        let summary = construct_client::history::HistorySummary {
+            messages: 8,
+            media: 3,
+            ..Default::default()
+        };
+        let outs = on_client_event(ClientEvent::HistoryImported(Ok(summary)), &mut model, "");
+        assert!(!copy.exists(), "the copy is gone");
+        assert!(matches!(
+            outs.as_slice(),
+            [ViewEvent::HistoryTransfer {
+                exported: false,
+                error: None,
+                messages: 8,
+                media: 3,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn a_history_file_does_not_overwrite_one_already_there() {
+        let dir = std::env::temp_dir().join(format!("konstruct-free-{}", now_ms()));
+        let first = free_path(&dir, "konstruct-history-ab", "cthf").unwrap();
+        std::fs::write(&first, b"1").unwrap();
+        let second = free_path(&dir, "konstruct-history-ab", "cthf").unwrap();
+        assert_ne!(first, second);
+        assert!(second.ends_with("konstruct-history-ab (1).cthf"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
