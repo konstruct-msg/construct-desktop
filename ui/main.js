@@ -51,6 +51,14 @@ const WORDS = {
     unvouchedToast: "{name} has a device none of their other devices confirmed. Open the chat to verify.",
     unvouchedBanner: "{name} has a device none of their other devices confirmed. It may be theirs, or someone else's.",
     compareSafety: "Compare safety numbers", unvouchedTitle: "Unconfirmed device",
+    reply: "Reply", edit: "Edit", copy: "Copy", deleteForMe: "Delete for me",
+    confirmDeleteMessage: "Delete here? Click again", edited: "edited", replyingTo: "Reply to {name}",
+    editing: "Editing", cancel: "Cancel", you: "you", messageActions: "Message actions",
+    deletedHint: "Deleted on this device. {name} still has it.",
+    attachment_photo: "Photo", attachment_video: "Video", attachment_audio: "Audio",
+    attachment_file: "File", attachment_voice: "Voice message", attachment_sticker: "Sticker",
+    attachment_location: "Location", attachment_contact: "Contact", attachment_poll: "Poll",
+    attachment_other: "Attachment", attachmentHint: "Not shown here yet — open it on your phone.",
   },
   ru: {
     appTitle: "КОНСТРУКТ", starting: "Открываю…",
@@ -92,6 +100,15 @@ const WORDS = {
     unvouchedToast: "У {name} появилось устройство, которое не подтвердило ни одно другое устройство этого аккаунта. Откройте чат, чтобы проверить.",
     unvouchedBanner: "У {name} появилось устройство, которое не подтвердило ни одно другое устройство этого аккаунта. Возможно, оно не принадлежит собеседнику.",
     compareSafety: "Сравнить защитные числа", unvouchedTitle: "Неподтверждённое устройство",
+    reply: "Ответить", edit: "Изменить", copy: "Копировать", deleteForMe: "Удалить у себя",
+    confirmDeleteMessage: "Удалить здесь? Нажмите ещё раз", edited: "изменено",
+    replyingTo: "Ответ {name}", editing: "Редактирование", cancel: "Отмена", you: "вам",
+    messageActions: "Действия с сообщением",
+    deletedHint: "Удалено на этом устройстве. У {name} оно осталось.",
+    attachment_photo: "Фото", attachment_video: "Видео", attachment_audio: "Аудио",
+    attachment_file: "Файл", attachment_voice: "Голосовое сообщение", attachment_sticker: "Стикер",
+    attachment_location: "Геопозиция", attachment_contact: "Контакт", attachment_poll: "Опрос",
+    attachment_other: "Вложение", attachmentHint: "Здесь пока не показывается — откройте на телефоне.",
   },
 };
 const LANG = (navigator.language || "en").toLowerCase().startsWith("ru") ? "ru" : "en";
@@ -202,7 +219,8 @@ const state = {
   screen: "starting",
   chats: [],
   open: null,
-  messages: new Map(), // peerId → [{id, text, sent, time, delivered}]
+  messages: new Map(), // peerId → [MessageRow, as bridge.rs sends it]
+  compose: null, // {mode: "reply" | "edit", message}
   account: null,
   recovery: "unknown",
   filter: "",
@@ -290,6 +308,8 @@ function chatName(peerId) {
 // ── Conversation ────────────────────────────────────────────────────────────
 
 function openChat(peerId) {
+  if (state.open !== peerId && state.compose) cancelCompose();
+  closeMessageMenu();
   state.open = peerId;
   $("empty").hidden = true;
   $("chat").hidden = false;
@@ -334,20 +354,160 @@ function renderTranscript(stick = true) {
   box.scrollTop = stick ? box.scrollHeight : kept;
 }
 
+const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+
 function messageNode(m, previous) {
   const wrap = el("div", `msg ${m.sent ? "out" : "in"}`);
   if (previous && (previous.sent !== m.sent || m.time - previous.time > 5 * 60000)) wrap.classList.add("gap");
   wrap.dataset.id = m.id;
-  wrap.append(el("div", "bubble", m.text));
+  const bubble = el("div", "bubble");
+  if (m.quote) {
+    const quote = el("button", "quote");
+    quote.type = "button";
+    quote.textContent = m.quote.text || "…";
+    quote.addEventListener("click", () => scrollToMessage(m.quote.id));
+    bubble.append(quote);
+  }
+  if (m.attachment) {
+    const chip = el("div", "attachment");
+    chip.append(el("span", "kind", `📎 ${t(`attachment_${m.attachment}`)}`), el("span", "hint", t("attachmentHint")));
+    bubble.append(chip);
+  }
+  if (m.text) bubble.append(el("span", "text", m.text));
+  wrap.append(bubble);
+  if (m.reactions.length > 0) {
+    const row = el("div", "reactions");
+    for (const r of m.reactions) {
+      const chip = el("button", r.mine ? "reaction mine" : "reaction", r.count > 1 ? `${r.emoji} ${r.count}` : r.emoji);
+      chip.type = "button";
+      chip.addEventListener("click", () => invoke("react", { messageId: m.id, emoji: r.emoji }));
+      row.append(chip);
+    }
+    wrap.append(row);
+  }
   const meta = el("div", "meta");
+  if (m.edited) meta.append(el("span", "", t("edited")));
   if (m.sent) {
     const mark = el("span", m.delivered ? "ok" : "");
     mark.innerHTML = m.delivered ? DELIVERED : SENT; // our own literals, never message data
     meta.append(mark);
   }
   meta.append(el("span", "", clock(m.time)));
+  const more = el("button", "more", "⋯");
+  more.type = "button";
+  more.setAttribute("aria-label", t("messageActions"));
+  more.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    openMessageMenu(m, ev.currentTarget.getBoundingClientRect());
+  });
+  meta.append(more);
   wrap.append(meta);
+  bubble.addEventListener("contextmenu", (ev) => {
+    ev.preventDefault();
+    openMessageMenu(m, { left: ev.clientX, right: ev.clientX, top: ev.clientY, bottom: ev.clientY });
+  });
+  bubble.addEventListener("dblclick", () => {
+    window.getSelection()?.removeAllRanges();
+    invoke("react", { messageId: m.id, emoji: "❤️" });
+  });
   return wrap;
+}
+
+function scrollToMessage(id) {
+  const node = [...$("transcript").querySelectorAll(".msg")].find((n) => n.dataset.id === id);
+  if (!node) return;
+  node.scrollIntoView({ block: "center", behavior: "smooth" });
+  node.classList.add("flash");
+  setTimeout(() => node.classList.remove("flash"), 1200);
+}
+
+// ── Message menu ────────────────────────────────────────────────────────────
+
+function openMessageMenu(m, at) {
+  const menu = $("msg-menu");
+  const quick = el("div", "quick");
+  for (const emoji of REACTIONS) {
+    const b = el("button", m.reactions.some((r) => r.mine && r.emoji === emoji) ? "mine" : "", emoji);
+    b.type = "button";
+    b.addEventListener("click", () => { closeMessageMenu(); invoke("react", { messageId: m.id, emoji }); });
+    quick.append(b);
+  }
+  const item = (key, action, cls = "") => {
+    const b = el("button", `item ${cls}`, t(key));
+    b.type = "button";
+    b.addEventListener("click", (ev) => action(ev.currentTarget));
+    return b;
+  };
+  const items = [item("reply", () => { closeMessageMenu(); startCompose("reply", m); })];
+  if (m.sent && !m.attachment) items.push(item("edit", () => { closeMessageMenu(); startCompose("edit", m); }));
+  if (m.text) {
+    items.push(item("copy", async () => {
+      closeMessageMenu();
+      await navigator.clipboard.writeText(m.text);
+      toast(t("copied"));
+    }));
+  }
+  items.push(item("deleteForMe", (button) => confirmTwice(button, "confirmDeleteMessage", () => {
+    closeMessageMenu();
+    invoke("delete_message", { messageId: m.id });
+  }), "danger"));
+  menu.replaceChildren(quick, ...items);
+  menu.hidden = false;
+  // Beside the message, inside the window.
+  const { innerWidth: w, innerHeight: h } = window;
+  const box = menu.getBoundingClientRect();
+  const left = Math.min(Math.max(8, at.left), w - box.width - 8);
+  const top = at.bottom + box.height + 8 < h ? at.bottom + 4 : Math.max(8, at.top - box.height - 4);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  menu.querySelector(".item")?.focus();
+}
+function closeMessageMenu() {
+  $("msg-menu").hidden = true;
+}
+document.addEventListener("click", (ev) => {
+  if (!$("msg-menu").hidden && !ev.target.closest("#msg-menu")) closeMessageMenu();
+});
+$("transcript").addEventListener("scroll", closeMessageMenu);
+window.addEventListener("blur", closeMessageMenu);
+
+// ── Replying and editing ────────────────────────────────────────────────────
+
+function startCompose(mode, message) {
+  state.compose = { mode, message };
+  $("compose-label").textContent = mode === "edit"
+    ? t("editing")
+    : t("replyingTo", { name: message.sent ? t("you") : chatName(state.open) });
+  $("compose-text").textContent = message.text || t(`attachment_${message.attachment ?? "other"}`);
+  $("compose-bar").hidden = false;
+  if (mode === "edit") draft.value = message.text;
+  fitDraft();
+  draft.focus();
+  draft.setSelectionRange(draft.value.length, draft.value.length);
+}
+function cancelCompose() {
+  if (state.compose?.mode === "edit") draft.value = "";
+  state.compose = null;
+  $("compose-bar").hidden = true;
+  fitDraft();
+}
+$("compose-cancel").addEventListener("click", () => { cancelCompose(); draft.focus(); });
+
+function replaceMessage(peerId, message) {
+  const list = state.messages.get(peerId);
+  const i = list?.findIndex((m) => m.id === message.id) ?? -1;
+  if (i < 0) return;
+  list[i] = message;
+  if (state.compose?.message.id === message.id) state.compose.message = message;
+  if (peerId === state.open) renderTranscript(false);
+}
+function removeMessage(peerId, messageId) {
+  const list = state.messages.get(peerId);
+  if (!list) return;
+  state.messages.set(peerId, list.filter((m) => m.id !== messageId));
+  if (state.compose?.message.id === messageId) cancelCompose();
+  if (peerId === state.open) renderTranscript(false);
+  toast(t("deletedHint", { name: chatName(peerId) }));
 }
 
 function appendMessage(peerId, message) {
@@ -388,7 +548,16 @@ function fitDraft() {
 function sendDraft() {
   const text = draft.value.trim();
   if (!text || !state.open) return;
-  invoke("send_message", { peerId: state.open, text });
+  const compose = state.compose;
+  if (compose?.mode === "edit") {
+    if (text !== compose.message.text) invoke("edit_message", { messageId: compose.message.id, text });
+  } else if (compose?.mode === "reply") {
+    invoke("reply", { peerId: state.open, text, to: compose.message.id });
+  } else {
+    invoke("send_message", { peerId: state.open, text });
+  }
+  state.compose = null;
+  $("compose-bar").hidden = true;
   draft.value = "";
   fitDraft();
 }
@@ -397,6 +566,17 @@ draft.addEventListener("keydown", (ev) => {
   if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229) {
     ev.preventDefault();
     sendDraft();
+  } else if (ev.key === "Escape" && state.compose) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    cancelCompose();
+  } else if (ev.key === "ArrowUp" && draft.value === "" && !state.compose) {
+    // The last message of ours, to edit — as in other messengers.
+    const mine = (state.messages.get(state.open) ?? []).filter((m) => m.sent && !m.attachment);
+    if (mine.length > 0) {
+      ev.preventDefault();
+      startCompose("edit", mine[mine.length - 1]);
+    }
   }
 });
 $("composer").addEventListener("submit", (ev) => {
@@ -684,7 +864,8 @@ document.addEventListener("keydown", (ev) => {
   } else if (mod && /^Digit[1-9]$/.test(ev.code)) {
     const chat = state.chats[Number(ev.code.slice(5)) - 1];
     if (chat) { ev.preventDefault(); openChat(chat.peerId); }
-  } else if (ev.key === "Escape" && state.open) closeChat();
+  } else if (ev.key === "Escape" && !$("msg-menu").hidden) closeMessageMenu();
+  else if (ev.key === "Escape" && state.open) closeChat();
 });
 
 // ── Events from Rust ────────────────────────────────────────────────────────
@@ -706,6 +887,8 @@ function onEvent(e) {
       if (e.peerId === state.open) renderTranscript();
       break;
     case "message": appendMessage(e.peerId, e.message); break;
+    case "messageChanged": replaceMessage(e.peerId, e.message); break;
+    case "messageDeleted": removeMessage(e.peerId, e.messageId); break;
     case "delivered": markDelivered(e.messageId); break;
     case "connection": {
       const dot = $("connection");
