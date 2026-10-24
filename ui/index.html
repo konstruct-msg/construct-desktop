@@ -171,6 +171,7 @@
       <button type="button" data-pane="devices" data-t="devices"></button>
       <button type="button" data-pane="chats" data-t="chatsAndLook"></button>
       <button type="button" data-pane="privacy" data-t="notificationsAndPrivacy"></button>
+      <button type="button" data-pane="storage" data-t="dataAndStorage"></button>
       <button type="button" data-pane="recovery" data-t="recoveryKey"></button>
       <button type="button" data-pane="about" data-t="about"></button>
       <span class="spacer"></span>
@@ -207,9 +208,17 @@
         <label class="toggle"><input type="checkbox" id="set-discoverable"><span data-t="discoverable"></span></label>
         <p class="small dim" id="discoverable-hint"></p>
         <dl class="facts">
+          <dt data-t="accountId"></dt><dd class="mono copyable" id="set-account-id" data-tl="clickToCopy"></dd>
+          <dt data-t="fingerprint"></dt><dd class="mono copyable" id="set-fingerprint" data-tl="clickToCopy"></dd>
           <dt data-t="deviceId"></dt><dd class="mono" id="set-device"></dd>
-          <dt data-t="server"></dt><dd class="mono" id="set-server"></dd>
         </dl>
+        <p class="small dim" data-t="fingerprintHint"></p>
+        <h3 class="section danger" data-t="dangerZone"></h3>
+        <div class="row">
+          <button type="button" class="secondary" id="sign-out-everywhere" data-t="signOutEverywhere"></button>
+          <button type="button" class="danger-button" id="delete-account" data-t="deleteAccount"></button>
+        </div>
+        <p class="small dim" data-t="signOutEverywhereHint"></p>
       </section>
       <section class="settings-pane" data-pane="devices" hidden>
         <h3 class="section" data-t="devices"></h3>
@@ -259,6 +268,38 @@
         <label class="toggle"><input type="checkbox" id="set-receipts"><span data-t="deliveryReceipts"></span></label>
         <p class="small dim" data-t="deliveryReceiptsHint"></p>
       </section>
+      <section class="settings-pane" data-pane="storage" hidden>
+        <h3 class="section" data-t="mediaCache"></h3>
+        <p id="cache-usage"></p>
+        <div class="meter" id="cache-meter"><span></span></div>
+        <div class="row"><button type="button" class="secondary" id="cache-clear" data-t="clearCache"></button></div>
+        <p class="small dim" data-t="clearCacheHint"></p>
+        <h3 class="section" data-t="autoDownload"></h3>
+        <div class="row choice" data-media="autoDownload">
+          <button type="button" class="tab" data-value="never" data-t="autoNever"></button>
+          <button type="button" class="tab" data-value="small" data-t="autoSmall"></button>
+          <button type="button" class="tab" data-value="always" data-t="autoAlways"></button>
+        </div>
+        <p class="small dim" data-t="autoDownloadHint"></p>
+        <h3 class="section" data-t="cacheLimit"></h3>
+        <div class="row choice" data-media="cacheLimit">
+          <button type="button" class="tab" data-value="268435456" data-bytes></button>
+          <button type="button" class="tab" data-value="536870912" data-bytes></button>
+          <button type="button" class="tab" data-value="1073741824" data-bytes></button>
+          <button type="button" class="tab" data-value="2147483648" data-bytes></button>
+          <button type="button" class="tab" data-value="5368709120" data-bytes></button>
+          <button type="button" class="tab" data-value="0" data-t="noLimit"></button>
+        </div>
+        <p class="small dim" data-t="cacheLimitHint"></p>
+        <h3 class="section" data-t="keepMedia"></h3>
+        <div class="row choice" data-media="keepDays">
+          <button type="button" class="tab" data-value="0" data-t="keepForever"></button>
+          <button type="button" class="tab" data-value="7" data-t="keep7"></button>
+          <button type="button" class="tab" data-value="30" data-t="keep30"></button>
+          <button type="button" class="tab" data-value="90" data-t="keep90"></button>
+        </div>
+        <p class="small dim" data-t="keepMediaHint"></p>
+      </section>
       <section class="settings-pane" data-pane="recovery" hidden>
         <h3 class="section" data-t="recoveryKey"></h3>
         <p id="recovery-status" class="small"></p>
@@ -271,6 +312,8 @@
         <h3 class="section" data-t="about"></h3>
         <dl class="facts">
           <dt data-t="version"></dt><dd class="mono" id="set-version"></dd>
+          <dt data-t="connectionLabel"></dt><dd id="set-connection"></dd>
+          <dt data-t="server"></dt><dd class="mono" id="set-server"></dd>
           <dt data-t="logs"></dt><dd class="mono small" id="set-logs"></dd>
         </dl>
         <div class="row"><button type="button" class="secondary" id="open-logs" data-t="openLogs"></button></div>
@@ -308,6 +351,18 @@
         <button type="submit" class="primary" data-t="save"></button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Deleting the account: a countdown that can be stopped, as on iOS -->
+  <dialog id="dlg-delete" class="sheet">
+    <h2 class="headline" data-t="deleteAccount"></h2>
+    <p class="small" data-t="deleteAccountWarning"></p>
+    <p id="delete-error" class="error small" hidden></p>
+    <div class="row end">
+      <button type="button" class="link" id="delete-local" data-t="deleteLocally" hidden></button>
+      <button type="button" class="secondary" id="delete-cancel" data-t="cancel"></button>
+      <button type="button" class="danger-button" id="delete-go" data-t="deleteAccount"></button>
+    </div>
   </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>

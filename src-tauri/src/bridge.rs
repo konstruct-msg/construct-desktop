@@ -7,6 +7,7 @@
 //! state crosses, and nothing the webview sends is more than an intent the client checks
 //! (decisions/desktop-web-interface.md).
 
+use construct_client::media::AutoDownload;
 use construct_client::{
     ClientCommand, ClientConfig, ClientEvent, ClientHandle,
     bridge::BridgeEvent,
@@ -141,6 +142,21 @@ pub enum ViewEvent {
         devices: Vec<DeviceRow>,
         delivery_receipts: bool,
         discoverable: Option<bool>,
+        /// Our identity key, short, to compare out of band.
+        fingerprint: Option<String>,
+        /// What the fetched attachments take.
+        media_bytes: u64,
+        media_files: usize,
+        /// `never`, `small` or `always`.
+        auto_download: &'static str,
+        /// Bytes; `None`: no limit.
+        cache_limit: Option<u64>,
+        /// `None`: kept always.
+        keep_days: Option<u32>,
+    },
+    /// The server did not delete the account; nothing was wiped.
+    DeleteFailed {
+        reason: String,
     },
     /// A one-line message: `error` for failures.
     Notice {
@@ -341,6 +357,12 @@ pub enum Intent {
     ConfirmRecoveryCopy(Vec<(usize, String)>),
     EnterRecoveryPhrase(Zeroizing<String>),
     Logout,
+    LogoutEverywhere,
+    DeleteAccount {
+        local_only: bool,
+    },
+    ClearMediaCache,
+    SetMediaPrefs(construct_client::local_store::MediaPrefs),
 }
 
 const REGISTRATION_STEPS: &[&str] = &[
@@ -395,6 +417,23 @@ impl Default for Notifications {
             preview: "nameAndMessage".into(),
             new_message: "New message".into(),
         }
+    }
+}
+
+fn auto_download_name(policy: AutoDownload) -> &'static str {
+    match policy {
+        AutoDownload::Never => "never",
+        AutoDownload::Small => "small",
+        AutoDownload::Always => "always",
+    }
+}
+
+/// The page's name for a fetch-on-arrival choice; anything else is the default.
+pub fn auto_download(name: &str) -> AutoDownload {
+    match name {
+        "never" => AutoDownload::Never,
+        "always" => AutoDownload::Always,
+        _ => AutoDownload::Small,
     }
 }
 
@@ -684,6 +723,12 @@ fn handle_intent(
             client.send(ClientCommand::EnterRecoveryPhrase(phrase))
         }
         Intent::Logout => client.send(ClientCommand::Logout),
+        Intent::LogoutEverywhere => client.send(ClientCommand::LogoutEverywhere),
+        Intent::DeleteAccount { local_only } => {
+            client.send(ClientCommand::DeleteAccount { local_only })
+        }
+        Intent::ClearMediaCache => client.send(ClientCommand::ClearMediaCache),
+        Intent::SetMediaPrefs(prefs) => client.send(ClientCommand::SetMediaPrefs(prefs)),
     }
 }
 
@@ -959,7 +1004,14 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
                 .collect(),
             delivery_receipts: s.delivery_receipts,
             discoverable: s.discoverable,
+            fingerprint: s.fingerprint,
+            media_bytes: s.media_bytes,
+            media_files: s.media_files,
+            auto_download: auto_download_name(s.media.auto_download),
+            cache_limit: s.media.quota,
+            keep_days: s.media.keep_days,
         }],
+        ClientEvent::DeleteAccountFailed(reason) => vec![ViewEvent::DeleteFailed { reason }],
         ClientEvent::Recovery(state) => {
             model.recovery = state.into();
             vec![ViewEvent::Recovery {
@@ -1318,6 +1370,36 @@ mod tests {
                 ..Default::default()
             },
         }
+    }
+
+    #[test]
+    fn a_fetch_choice_goes_to_the_page_and_back_unchanged() {
+        for p in [
+            AutoDownload::Never,
+            AutoDownload::Small,
+            AutoDownload::Always,
+        ] {
+            assert_eq!(auto_download(auto_download_name(p)), p);
+        }
+        assert_eq!(
+            auto_download("anything"),
+            AutoDownload::Small,
+            "the default"
+        );
+    }
+
+    #[test]
+    fn a_refused_deletion_reaches_the_page() {
+        let mut model = model();
+        let events = on_client_event(
+            ClientEvent::DeleteAccountFailed("grpc 14: unavailable".into()),
+            &mut model,
+            "",
+        );
+        assert!(matches!(
+            events.as_slice(),
+            [ViewEvent::DeleteFailed { reason }] if reason.contains("unavailable")
+        ));
     }
 
     #[test]

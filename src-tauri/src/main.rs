@@ -255,6 +255,41 @@ fn logout(intents: State<Intents>) {
     intents.send(Intent::Logout);
 }
 
+/// Sign out every device of the account, this one wiped too.
+#[tauri::command]
+fn logout_everywhere(intents: State<Intents>) {
+    intents.send(Intent::LogoutEverywhere);
+}
+
+/// Delete the account and wipe this device; `local_only`: wipe only.
+#[tauri::command]
+fn delete_account(local_only: bool, intents: State<Intents>) {
+    intents.send(Intent::DeleteAccount { local_only });
+}
+
+#[tauri::command]
+fn clear_media_cache(intents: State<Intents>) {
+    intents.send(Intent::ClearMediaCache);
+}
+
+/// How attachments are fetched and kept: `never`, `small` or `always`; a limit in bytes and an
+/// age in days, absent for none.
+#[tauri::command]
+fn set_media_prefs(
+    auto_download: String,
+    cache_limit: Option<u64>,
+    keep_days: Option<u32>,
+    intents: State<Intents>,
+) {
+    intents.send(Intent::SetMediaPrefs(
+        construct_client::local_store::MediaPrefs {
+            auto_download: bridge::auto_download(&auto_download),
+            quota: cache_limit.filter(|b| *b > 0),
+            keep_days: keep_days.filter(|d| *d > 0),
+        },
+    ));
+}
+
 /// Show the recovery phrase that waits for its copy: the one secret the window is ever given,
 /// because the person has to read it.
 #[tauri::command]
@@ -422,6 +457,10 @@ fn main() {
             safety_number,
             mint_invite,
             logout,
+            logout_everywhere,
+            delete_account,
+            clear_media_cache,
+            set_media_prefs,
             reveal_recovery_phrase,
             confirm_recovery_copy,
             enter_recovery_phrase,
