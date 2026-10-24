@@ -261,6 +261,41 @@ fn logout_everywhere(intents: State<Intents>) {
     intents.send(Intent::LogoutEverywhere);
 }
 
+/// Close the window now, if the app lock is on.
+#[tauri::command]
+fn lock_now(intents: State<Intents>) {
+    intents.send(Intent::LockNow);
+}
+
+/// A code typed at the lock screen; the client checks it.
+#[tauri::command]
+fn unlock_app(code: String, intents: State<Intents>) {
+    intents.send(Intent::UnlockApp(Zeroizing::new(code)));
+}
+
+/// Set, change or remove the app lock's code, or change its delay.
+#[tauri::command]
+fn set_app_lock(
+    current: Option<String>,
+    code: Option<String>,
+    remove: bool,
+    delay_secs: u32,
+    intents: State<Intents>,
+) {
+    intents.send(Intent::SetAppLock {
+        current: current.map(Zeroizing::new),
+        code: code.map(Zeroizing::new),
+        remove,
+        delay_secs,
+    });
+}
+
+/// Burn invites this device handed out.
+#[tauri::command]
+fn revoke_invites(jtis: Vec<String>, intents: State<Intents>) {
+    intents.send(Intent::RevokeInvites(jtis));
+}
+
 /// Show a code a new device scans to join this account.
 #[tauri::command]
 fn offer_link(intents: State<Intents>) {
@@ -476,6 +511,10 @@ fn main() {
             logout,
             logout_everywhere,
             offer_link,
+            lock_now,
+            unlock_app,
+            set_app_lock,
+            revoke_invites,
             cancel_link_offer,
             approve_device,
             delete_account,

@@ -166,6 +166,19 @@ pub enum ViewEvent {
         cache_limit: Option<u64>,
         /// `None`: kept always.
         keep_days: Option<u32>,
+        invites: Vec<InviteRow>,
+    },
+    /// The app lock closed the window: the page drops what it shows and asks for the code.
+    Locked,
+    /// The code matched; the page is drawn again from what follows.
+    Unlocked,
+    UnlockFailed {
+        reason: String,
+    },
+    /// Whether the app lock is on, and its delay in seconds.
+    LockSetting {
+        enabled: bool,
+        delay_secs: u32,
     },
     /// The server did not delete the account; nothing was wiped.
     DeleteFailed {
@@ -260,6 +273,17 @@ pub struct DeviceRow {
     pub name: Option<String>,
     /// `ios`, `android`, `desktop`, … or empty.
     pub platform: &'static str,
+}
+
+/// An invite this device handed out that may still be redeemed.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteRow {
+    pub jti: String,
+    pub kind: String,
+    /// Unix milliseconds.
+    pub issued: i64,
+    pub expires: i64,
 }
 
 /// A file of a message, before it is fetched: enough to draw its place.
@@ -371,6 +395,15 @@ pub enum Intent {
     EnterRecoveryPhrase(Zeroizing<String>),
     Logout,
     LogoutEverywhere,
+    LockNow,
+    RevokeInvites(Vec<String>),
+    UnlockApp(Zeroizing<String>),
+    SetAppLock {
+        current: Option<Zeroizing<String>>,
+        code: Option<Zeroizing<String>>,
+        remove: bool,
+        delay_secs: u32,
+    },
     /// Show a code for a new device to scan.
     OfferLink,
     CancelLinkOffer,
@@ -414,6 +447,74 @@ struct Model {
     focused: bool,
     /// People's pictures as data URIs, for a reloaded page.
     avatars: std::collections::HashMap<String, String>,
+    lock: Lock,
+}
+
+/// The app lock as this window keeps it. While `locked`, the page is sent nothing of the account
+/// and what it asks is not done, but for the code; that is the lock, not the page's overlay.
+#[derive(Debug, Default)]
+struct Lock {
+    enabled: bool,
+    delay_secs: u32,
+    locked: bool,
+    /// Whether the client has said yet: the first word, at a start, closes the window.
+    told: bool,
+    /// When the window lost the focus.
+    away_since: Option<std::time::Instant>,
+}
+
+impl Lock {
+    fn set(&mut self, lock: construct_client::AppLock) {
+        if lock.enabled && !self.told {
+            self.locked = true;
+        }
+        self.told = true;
+        self.enabled = lock.enabled;
+        self.delay_secs = lock.delay_secs;
+        if !lock.enabled {
+            self.locked = false;
+        }
+    }
+
+    /// Away for longer than the delay, and not locked yet.
+    fn due(&self, now: std::time::Instant) -> bool {
+        self.enabled
+            && !self.locked
+            && self.away_since.is_some_and(|t| {
+                now.duration_since(t) >= std::time::Duration::from_secs(self.delay_secs.into())
+            })
+    }
+
+    /// What the page may be sent while the window is locked.
+    fn lets_through(event: &ViewEvent) -> bool {
+        matches!(
+            event,
+            ViewEvent::Screen { .. }
+                | ViewEvent::Connection { .. }
+                | ViewEvent::Locked
+                | ViewEvent::Unlocked
+                | ViewEvent::UnlockFailed { .. }
+                | ViewEvent::LockSetting { .. }
+        )
+    }
+}
+
+/// What of `outs` the page is sent: everything, or while locked only what the lock lets through.
+fn visible(model: &Model, outs: Vec<ViewEvent>) -> Vec<ViewEvent> {
+    if !model.lock.locked {
+        return outs;
+    }
+    outs.into_iter().filter(Lock::lets_through).collect()
+}
+
+/// Close the window if the lock is due.
+fn lock_if_due(model: &mut Model) -> Vec<ViewEvent> {
+    if model.lock.due(std::time::Instant::now()) {
+        model.lock.locked = true;
+        vec![ViewEvent::Locked]
+    } else {
+        Vec::new()
+    }
 }
 
 /// The person's choice of what a notification of a new message says. Kept by the page with its
@@ -462,6 +563,10 @@ fn notification(model: &Model, peer_id: &str, row: &MessageRow) -> Option<(Strin
     let watching = model.focused && model.open_chat.as_deref() == Some(peer_id);
     if !n.enabled || row.sent || watching {
         return None;
+    }
+    // A locked window says nothing of who wrote or what.
+    if model.lock.locked {
+        return Some(("Konstruct".into(), n.new_message.clone()));
     }
     let name = model
         .chats
@@ -549,6 +654,7 @@ pub async fn run(
         notify: Notifications::default(),
         focused: true,
         avatars: Default::default(),
+        lock: Lock::default(),
     };
     model.screen = match construct_client::stored_session_state() {
         SessionState::Encrypted => Screen::Unlock,
@@ -559,9 +665,18 @@ pub async fn run(
         SessionState::None => Screen::Onboarding,
     };
     let mut view: Option<Channel<ViewEvent>> = None;
+    // While the window is away, the lock's delay runs out without anything happening.
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(5));
 
     loop {
         tokio::select! {
+            _ = tick.tick() => {
+                for out in lock_if_due(&mut model) {
+                    if let Some(view) = &view {
+                        let _ = view.send(out);
+                    }
+                }
+            }
             intent = intents.recv() => {
                 let Some(intent) = intent else { break };
                 handle_intent(intent, &client, &mut model, &mut view);
@@ -577,7 +692,8 @@ pub async fn run(
                         });
                     }
                 }
-                for out in on_client_event(event, &mut model, &server) {
+                let outs = on_client_event(event, &mut model, &server);
+                for out in visible(&model, outs) {
                     if let Some(view) = &view {
                         // A closed channel is a page being reloaded; it attaches again.
                         let _ = view.send(out);
@@ -599,6 +715,18 @@ fn handle_intent(
             let _ = view.send(event);
         }
     };
+    if model.lock.locked
+        && !matches!(
+            intent,
+            Intent::Attach(_)
+                | Intent::UnlockApp(_)
+                | Intent::Focus(_)
+                | Intent::Notifications(_)
+                | Intent::Logout
+        )
+    {
+        return tracing::info!("locked: intent not done");
+    }
     match intent {
         Intent::Attach(channel) => {
             for event in snapshot(model) {
@@ -695,7 +823,43 @@ fn handle_intent(
             bytes,
             caption,
         }),
-        Intent::Focus(focused) => model.focused = focused,
+        Intent::Focus(focused) => {
+            model.focused = focused;
+            let now = std::time::Instant::now();
+            if focused {
+                // Back after the delay ran out between two ticks.
+                for event in lock_if_due(model) {
+                    send(view, event);
+                }
+                model.lock.away_since = None;
+            } else {
+                model.lock.away_since = Some(now);
+                if model.lock.delay_secs == 0 {
+                    for event in lock_if_due(model) {
+                        send(view, event);
+                    }
+                }
+            }
+        }
+        Intent::LockNow => {
+            if model.lock.enabled && !model.lock.locked {
+                model.lock.locked = true;
+                send(view, ViewEvent::Locked);
+            }
+        }
+        Intent::UnlockApp(code) => client.send(ClientCommand::UnlockApp(code)),
+        Intent::RevokeInvites(jtis) => client.send(ClientCommand::RevokeInvites(jtis)),
+        Intent::SetAppLock {
+            current,
+            code,
+            remove,
+            delay_secs,
+        } => client.send(ClientCommand::SetAppLock {
+            current,
+            code,
+            remove,
+            delay_secs,
+        }),
         Intent::Notifications(notify) => model.notify = notify,
         Intent::LoadSettings => client.send(ClientCommand::LoadSettings),
         Intent::ChangeUsername(name) => client.send(ClientCommand::ChangeUsername(name)),
@@ -767,6 +931,19 @@ fn snapshot(model: &Model) -> Vec<ViewEvent> {
     let mut events = vec![ViewEvent::Screen {
         screen: model.screen,
     }];
+    if model.lock.told {
+        events.push(ViewEvent::LockSetting {
+            enabled: model.lock.enabled,
+            delay_secs: model.lock.delay_secs,
+        });
+    }
+    if model.lock.locked {
+        events.push(ViewEvent::Connection {
+            connected: model.connected,
+        });
+        events.push(ViewEvent::Locked);
+        return events;
+    }
     if let Some(account) = &model.account {
         events.push(account.clone());
     }
@@ -1020,6 +1197,7 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             },
         }],
         ClientEvent::LoggedOut => {
+            model.lock = Lock::default();
             model.chats.clear();
             model.open_chat = None;
             model.account = None;
@@ -1056,8 +1234,39 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             auto_download: auto_download_name(s.media.auto_download),
             cache_limit: s.media.quota,
             keep_days: s.media.keep_days,
+            invites: s
+                .invites
+                .into_iter()
+                .map(|i| InviteRow {
+                    jti: i.jti,
+                    kind: i.kind,
+                    issued: i.issued_at_ms,
+                    expires: i.expires_at_ms,
+                })
+                .collect(),
         }],
         ClientEvent::DeleteAccountFailed(reason) => vec![ViewEvent::DeleteFailed { reason }],
+        ClientEvent::AppLock(lock) => {
+            let was = model.lock.locked;
+            model.lock.set(lock);
+            let mut out = vec![ViewEvent::LockSetting {
+                enabled: lock.enabled,
+                delay_secs: lock.delay_secs,
+            }];
+            if model.lock.locked && !was {
+                out.push(ViewEvent::Locked);
+            }
+            out
+        }
+        ClientEvent::AppUnlocked(Ok(())) => {
+            model.lock.locked = false;
+            model.lock.away_since = None;
+            let mut out = vec![ViewEvent::Unlocked];
+            out.extend(snapshot(model));
+            out
+        }
+        ClientEvent::AppUnlocked(Err(reason)) => vec![ViewEvent::UnlockFailed { reason }],
+        ClientEvent::AppLockRefused(reason) => vec![notice(reason, true)],
         ClientEvent::Recovery(state) => {
             model.recovery = state.into();
             vec![ViewEvent::Recovery {
@@ -1402,6 +1611,7 @@ mod tests {
             notify: Notifications::default(),
             focused: true,
             avatars: Default::default(),
+            lock: Lock::default(),
         }
     }
 
@@ -1416,6 +1626,83 @@ mod tests {
                 ..Default::default()
             },
         }
+    }
+
+    fn lock_on(delay_secs: u32) -> ClientEvent {
+        ClientEvent::AppLock(construct_client::AppLock {
+            enabled: true,
+            delay_secs,
+        })
+    }
+
+    #[test]
+    fn a_window_with_a_lock_starts_locked_and_shows_nothing_until_the_code() {
+        let mut model = model();
+        let outs = on_client_event(lock_on(60), &mut model, "");
+        assert!(outs.iter().any(|e| matches!(e, ViewEvent::Locked)));
+        let outs = on_client_event(
+            ClientEvent::Bridge(received("bob", "m1", "secret plans", 1)),
+            &mut model,
+            "",
+        );
+        let json = serde_json::to_string(&visible(&model, outs)).unwrap();
+        assert!(
+            !json.contains("secret plans") && !json.contains("bob"),
+            "{json}"
+        );
+        let reload = serde_json::to_string(&snapshot(&model)).unwrap();
+        assert!(
+            !reload.contains("secret plans") && !reload.contains("\"chats\""),
+            "{reload}"
+        );
+        let outs = on_client_event(ClientEvent::AppUnlocked(Ok(())), &mut model, "");
+        let json = serde_json::to_string(&visible(&model, outs)).unwrap();
+        assert!(
+            json.contains("secret plans"),
+            "unlocked, the page is drawn again"
+        );
+    }
+
+    #[test]
+    fn a_lock_turned_on_later_does_not_close_the_window_at_once() {
+        let mut model = model();
+        on_client_event(
+            ClientEvent::AppLock(construct_client::AppLock {
+                enabled: false,
+                delay_secs: 0,
+            }),
+            &mut model,
+            "",
+        );
+        let outs = on_client_event(lock_on(0), &mut model, "");
+        assert!(!outs.iter().any(|e| matches!(e, ViewEvent::Locked)));
+        assert!(!model.lock.locked);
+    }
+
+    #[test]
+    fn the_lock_falls_when_the_window_has_been_away_its_delay() {
+        let now = std::time::Instant::now();
+        let mut lock = Lock {
+            enabled: true,
+            delay_secs: 60,
+            told: true,
+            ..Default::default()
+        };
+        assert!(!lock.due(now), "not away");
+        lock.away_since = Some(now);
+        assert!(!lock.due(now + std::time::Duration::from_secs(59)));
+        assert!(lock.due(now + std::time::Duration::from_secs(60)));
+        lock.enabled = false;
+        assert!(!lock.due(now + std::time::Duration::from_secs(600)));
+    }
+
+    #[test]
+    fn a_locked_window_announces_a_message_without_who_or_what() {
+        let mut model = model();
+        on_client_event(lock_on(0), &mut model, "");
+        let (title, body) = notification(&model, "bob", &row("secret plans", false)).unwrap();
+        assert_eq!(title, "Konstruct");
+        assert!(!body.contains("secret"));
     }
 
     #[test]

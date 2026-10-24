@@ -321,6 +321,8 @@ dialog.settings[open] { display: grid; grid-template-columns: 200px 1fr; }
 .settings-pane > p { margin: -4px 0 0; }
 .settings-pane .section.danger { color: var(--danger); margin-top: 20px; }
 .copyable { cursor: copy; }
+.lock-screen { position: fixed; inset: 0; z-index: 1000; background: var(--bg); }
+.column-form { display: flex; flex-direction: column; gap: 8px; max-width: 420px; }
 .copyable:hover { color: var(--accent); }
 .meter { height: 6px; border-radius: 3px; background: var(--noise); overflow: hidden; }
 .meter > span { display: block; height: 100%; width: 0; background: var(--accent); }

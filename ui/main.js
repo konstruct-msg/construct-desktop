@@ -48,6 +48,21 @@ const WORDS = {
     quizWrong: "Those words don't match. Look at your copy again.", copyConfirmed: "Copy confirmed",
     enterHint: "The twelve words, in order, separated by spaces.", save: "Save", phraseAccepted: "Phrase accepted",
     about: "About", version: "Version", logs: "Logs", openLogs: "Open logs folder",
+    lockHint: "Enter the code to open Konstruct.", unlock: "Unlock",
+    lockWrong: "Wrong code", lockWait: "Too many wrong codes: wait {n} s",
+    lockForgot: "Forgot the code? Sign out and erase this device",
+    confirmLockForgot: "Erase this device? Click again",
+    appLock: "App lock", lockOn: "On: the code is asked for after the window has been away", lockOffStatus: "Off",
+    lockNowDelay: "At once", lock1m: "1 min", lock5m: "5 min", lock15m: "15 min", lock1h: "1 hour",
+    lockDelayHint: "How long the window may be away (another window in front, or minimized) before the code is asked for.",
+    lockCurrent: "Current code", lockNew: "New code (at least 4 characters)", lockRepeat: "New code again",
+    lockEnable: "Turn on", lockChange: "Change code", lockNow: "Lock now", lockOff: "Turn off",
+    lockMismatch: "The two codes differ", lockShort: "A code has at least 4 characters", lockNeedCurrent: "Enter the current code",
+    lockScreenHint: "It locks the window, not the data on disk. Forgetting the code means signing out.",
+    minutesShort: "min", issuedInvites: "Issued invites", noInvites: "No invite can be redeemed now.",
+    inviteKind_qr: "QR code and link", inviteKind_link: "Link", inviteLeft: "{time} left",
+    revokeInvite: "Revoke", revokeAllInvites: "Revoke all", confirmRevokeInvite: "Revoke? Click again",
+    issuedInvitesHint: "An invite works once and for a few minutes. Revoke one you showed by mistake: nobody can use it then.",
     linkDevice: "Link a device", showLinkCode: "Show a code for a new device",
     showLinkCodeHint: "The new device scans it when it signs in to an existing account. This device then vouches for it to your contacts.",
     approvePlaceholder: "konstruct://link-to-me?…", approve: "Link",
@@ -160,6 +175,21 @@ const WORDS = {
     quizWrong: "Слова не совпадают. Сверьтесь с записью.", copyConfirmed: "Копия подтверждена",
     enterHint: "Двенадцать слов по порядку через пробел.", save: "Сохранить", phraseAccepted: "Фраза принята",
     about: "О приложении", version: "Версия", logs: "Логи", openLogs: "Открыть папку с логами",
+    lockHint: "Введите код, чтобы открыть Konstruct.", unlock: "Открыть",
+    lockWrong: "Неверный код", lockWait: "Слишком много неверных кодов: подождите {n} с",
+    lockForgot: "Забыли код? Выйти и стереть устройство",
+    confirmLockForgot: "Стереть устройство? Нажмите ещё раз",
+    appLock: "Блокировка", lockOn: "Включена: код спрашивается, когда окно было в стороне", lockOffStatus: "Выключена",
+    lockNowDelay: "Сразу", lock1m: "1 мин", lock5m: "5 мин", lock15m: "15 мин", lock1h: "1 час",
+    lockDelayHint: "Сколько окно может быть в стороне (другое окно поверх или свёрнуто), прежде чем спросить код.",
+    lockCurrent: "Текущий код", lockNew: "Новый код (не меньше 4 символов)", lockRepeat: "Новый код ещё раз",
+    lockEnable: "Включить", lockChange: "Сменить код", lockNow: "Заблокировать сейчас", lockOff: "Выключить",
+    lockMismatch: "Коды не совпадают", lockShort: "Код — не меньше 4 символов", lockNeedCurrent: "Введите текущий код",
+    lockScreenHint: "Закрывается окно, а не данные на диске. Забытый код — это выход из аккаунта.",
+    minutesShort: "мин", issuedInvites: "Выданные приглашения", noInvites: "Сейчас ни одним приглашением нельзя воспользоваться.",
+    inviteKind_qr: "QR-код и ссылка", inviteKind_link: "Ссылка", inviteLeft: "осталось {time}",
+    revokeInvite: "Отозвать", revokeAllInvites: "Отозвать все", confirmRevokeInvite: "Отозвать? Нажмите ещё раз",
+    issuedInvitesHint: "Приглашение срабатывает один раз и действует несколько минут. Отзовите показанное по ошибке, и им никто не воспользуется.",
     linkDevice: "Привязать устройство", showLinkCode: "Показать код для нового устройства",
     showLinkCodeHint: "Новое устройство сканирует его при входе в существующий аккаунт. Затем это устройство подтверждает его вашим собеседникам.",
     approvePlaceholder: "konstruct://link-to-me?…", approve: "Привязать",
@@ -369,6 +399,7 @@ const state = {
   filter: "",
   invite: null,
   settings: null, // the account's settings as the client last sent them
+  lock: { enabled: false, delaySecs: 0, locked: false },
   connected: false,
   avatars: new Map(), // peerId → data URI of the picture their profile carried
   link: null,
@@ -390,6 +421,7 @@ function showScreen(screen) {
   if (screen === "onboarding") {
     // Signed out or deleted: what was open belonged to the account.
     resetDelete();
+    onUnlocked();
     for (const d of document.querySelectorAll("dialog[open]")) d.close();
     state.settings = null;
     $("alias").focus();
@@ -1048,6 +1080,7 @@ function openSettings(pane = "profile") {
   markTheme();
   markPrefs();
   renderAccountSettings();
+  renderLock();
   invoke("load_settings");
   showPane(pane);
   $("dlg-settings").showModal();
@@ -1118,6 +1151,7 @@ function renderAccountSettings() {
   $("set-receipts").disabled = !s;
   $("set-fingerprint").textContent = s?.fingerprint ?? "";
   renderStorage();
+  renderInvites();
 
   const list = $("set-devices");
   if (!s) return list.replaceChildren(el("li", "dim", t("loadingDevices")));
@@ -1284,6 +1318,115 @@ for (const id of ["set-account-id", "set-fingerprint"]) {
 function renderConnection() {
   $("set-connection").textContent = t(state.connected ? "online" : "offline");
 }
+
+// ── The app lock ────────────────────────────────────────────────────────────
+
+// The client words its refusals in English; the two the lock screen shows, in the page's language.
+function lockReason(reason) {
+  if (reason === "Wrong code") return t("lockWrong");
+  const wait = /^Too many wrong codes: wait (\d+) s$/.exec(reason);
+  return wait ? t("lockWait", { n: wait[1] }) : reason;
+}
+
+// Rust stops sending the account while locked; what the page already shows goes here.
+function onLocked() {
+  state.lock.locked = true;
+  for (const d of document.querySelectorAll("dialog[open]")) d.close();
+  if (state.open) closeChat();
+  state.messages.clear();
+  state.chats = [];
+  state.settings = null;
+  renderChats();
+  $("lock-error").hidden = true;
+  $("lock-code").value = "";
+  $("lock-screen").hidden = false;
+  $("lock-code").focus();
+}
+function onUnlocked() {
+  state.lock.locked = false;
+  $("lock-screen").hidden = true;
+  $("lock-code").value = "";
+}
+$("lock-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const code = $("lock-code").value;
+  if (code) invoke("unlock_app", { code });
+});
+$("lock-forgot").addEventListener("click", (ev) =>
+  confirmTwice(ev.currentTarget, "confirmLockForgot", () => invoke("logout")));
+
+function renderLock() {
+  const on = state.lock.enabled;
+  $("lock-status").textContent = t(on ? "lockOn" : "lockOffStatus");
+  for (const b of $("lock-delay").querySelectorAll("[data-value]")) {
+    b.setAttribute("aria-selected", String(Number(b.dataset.value) === (on ? state.lock.delaySecs : pendingDelay)));
+  }
+  $("lock-current").hidden = !on;
+  $("lock-save").textContent = t(on ? "lockChange" : "lockEnable");
+  $("lock-now").hidden = !on;
+  $("lock-off").hidden = !on;
+}
+// The delay chosen before a code is set; with one, a choice is kept at once.
+let pendingDelay = 300;
+$("lock-delay").addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-value]");
+  if (!b) return;
+  const delaySecs = Number(b.dataset.value);
+  if (!state.lock.enabled) {
+    pendingDelay = delaySecs;
+    return renderLock();
+  }
+  invoke("set_app_lock", { current: null, code: null, remove: false, delaySecs });
+});
+function clearLockFields() {
+  for (const id of ["lock-current", "lock-new", "lock-repeat"]) $(id).value = "";
+}
+$("lock-set-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const on = state.lock.enabled;
+  const current = $("lock-current").value;
+  const code = $("lock-new").value;
+  if (on && !current) return toast(t("lockNeedCurrent"), true);
+  if ([...code].length < 4) return toast(t("lockShort"), true);
+  if (code !== $("lock-repeat").value) return toast(t("lockMismatch"), true);
+  invoke("set_app_lock", {
+    current: on ? current : null, code, remove: false,
+    delaySecs: on ? state.lock.delaySecs : pendingDelay,
+  });
+  clearLockFields();
+});
+$("lock-off").addEventListener("click", () => {
+  const current = $("lock-current").value;
+  if (!current) return toast(t("lockNeedCurrent"), true);
+  invoke("set_app_lock", { current, code: null, remove: true, delaySecs: 0 });
+  clearLockFields();
+});
+$("lock-now").addEventListener("click", () => invoke("lock_now"));
+
+// ── Issued invites ──────────────────────────────────────────────────────────
+
+function renderInvites() {
+  const list = $("set-invites");
+  const invites = state.settings?.invites ?? [];
+  $("revoke-invites").hidden = invites.length < 2;
+  if (!invites.length) return list.replaceChildren(el("li", "dim", t("noInvites")));
+  list.replaceChildren(...invites.map((i) => {
+    const li = el("li");
+    const label = el("div", "device-label");
+    const left = Math.max(0, Math.round((i.expires - Date.now()) / 60000));
+    label.append(el("span", "", t(`inviteKind_${i.kind}`)),
+      el("span", "small dim", `${new Date(i.issued).toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" })} · ${t("inviteLeft", { time: `${left < 1 ? "<1" : left} ${t("minutesShort")}` })}`));
+    const revoke = el("button", "danger-link", t("revokeInvite"));
+    revoke.type = "button";
+    revoke.addEventListener("click", (ev) =>
+      confirmTwice(ev.currentTarget, "confirmRevokeInvite", () => invoke("revoke_invites", { jtis: [i.jti] })));
+    li.append(label, revoke);
+    return li;
+  }));
+}
+$("revoke-invites").addEventListener("click", (ev) =>
+  confirmTwice(ev.currentTarget, "confirmRevokeInvite", () =>
+    invoke("revoke_invites", { jtis: (state.settings?.invites ?? []).map((i) => i.jti) })));
 
 // ── Linking a device from here ──────────────────────────────────────────────
 
@@ -1560,7 +1703,7 @@ $("chat-info").addEventListener("click", openInfo);
 
 // Shortcuts by physical key, so they work on a Russian layout too (Ctrl+K is not Ctrl+Л).
 document.addEventListener("keydown", (ev) => {
-  if (state.screen !== "main" || document.querySelector("dialog[open]")) return;
+  if (state.screen !== "main" || state.lock.locked || document.querySelector("dialog[open]")) return;
   const mod = ev.ctrlKey || ev.metaKey;
   if (mod && ev.code === "KeyK") { ev.preventDefault(); $("chat-search").focus(); }
   else if (mod && ev.code === "KeyN") { ev.preventDefault(); openAddContact(); }
@@ -1616,6 +1759,18 @@ function onEvent(e) {
       break;
     }
     case "deleteFailed": onDeleteFailed(e.reason); break;
+    case "lockSetting":
+      state.lock.enabled = e.enabled;
+      state.lock.delaySecs = e.delaySecs;
+      renderLock();
+      break;
+    case "locked": onLocked(); break;
+    case "unlocked": onUnlocked(); break;
+    case "unlockFailed":
+      $("lock-error").textContent = lockReason(e.reason);
+      $("lock-error").hidden = false;
+      $("lock-code").select();
+      break;
     case "linkOffer": onLinkOffer(e); break;
     case "linkOfferEnded": onLinkOfferEnded(e); break;
     case "registrationStep": setRegistration(e.done, e.total, e.label); break;
