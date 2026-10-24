@@ -8,7 +8,7 @@
 mod bridge;
 
 use bridge::{Intent, ViewEvent};
-use tauri::{State, ipc::Channel};
+use tauri::{Manager, State, ipc::Channel};
 use tokio::sync::mpsc;
 use zeroize::Zeroizing;
 
@@ -93,17 +93,105 @@ fn logout(intents: State<Intents>) {
     intents.send(Intent::Logout);
 }
 
-fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+/// Show the recovery phrase that waits for its copy: the one secret the window is ever given,
+/// because the person has to read it.
+#[tauri::command]
+fn reveal_recovery_phrase(intents: State<Intents>) {
+    intents.send(Intent::RevealRecoveryPhrase);
+}
 
+/// Words of the phrase by position, as the person typed them back; the client checks them.
+#[tauri::command]
+fn confirm_recovery_copy(answers: Vec<(usize, String)>, intents: State<Intents>) {
+    intents.send(Intent::ConfirmRecoveryCopy(answers));
+}
+
+#[tauri::command]
+fn enter_recovery_phrase(phrase: String, intents: State<Intents>) {
+    intents.send(Intent::EnterRecoveryPhrase(Zeroizing::new(phrase)));
+}
+
+/// Where the logs are written.
+struct LogDir(std::path::PathBuf);
+
+/// Open the log folder in the system's file manager.
+#[tauri::command]
+fn open_logs(dir: State<LogDir>) -> Result<(), String> {
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(target_os = "windows") {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(opener)
+        .arg(&dir.0)
+        .spawn()
+        .map(drop)
+        .map_err(|e| format!("{opener}: {e}"))
+}
+
+#[tauri::command]
+fn logs_path(dir: State<LogDir>) -> String {
+    dir.0.display().to_string()
+}
+
+/// Log to the terminal and to a file a day in `dir`, the last week kept: an app started from
+/// the menu has no terminal, and the logs are what a person can send when something is wrong.
+/// They stay on this computer; message text is never logged.
+fn init_logging(dir: &std::path::Path) {
+    use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+    let filter = || {
+        EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new("info,h2=warn,rustls=warn"))
+    };
+    let file = std::fs::create_dir_all(dir)
+        .map_err(|e| e.to_string())
+        .and_then(|()| {
+            tracing_appender::rolling::Builder::new()
+                .rotation(tracing_appender::rolling::Rotation::DAILY)
+                .filename_prefix("konstruct")
+                .filename_suffix("log")
+                .max_log_files(7)
+                .build(dir)
+                .map_err(|e| e.to_string())
+        });
+    let registry = tracing_subscriber::registry().with(fmt::layer().with_filter(filter()));
+    match file {
+        Ok(appender) => registry
+            .with(
+                fmt::layer()
+                    .with_ansi(false)
+                    .with_writer(appender)
+                    .with_filter(filter()),
+            )
+            .init(),
+        Err(e) => {
+            registry.init();
+            tracing::warn!(error = %e, dir = %dir.display(), "logs go to the terminal only");
+        }
+    }
+}
+
+fn main() {
     let (intents, inbox) = mpsc::unbounded_channel();
     let config = construct_client::config::load_config().unwrap_or_default();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // WKWebView takes copy and paste only from an Edit menu; Linux and Windows need none, and a
+    // menu there would be a menu bar in the window.
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(tauri::menu::Menu::default);
+    builder
         .manage(Intents(intents))
-        .setup(move |_| {
+        .setup(move |app| {
+            let dir = app
+                .path()
+                .app_log_dir()
+                .unwrap_or_else(|_| std::env::temp_dir().join("konstruct-logs"));
+            init_logging(&dir);
+            tracing::info!(version = env!("CARGO_PKG_VERSION"), "Konstruct starting");
+            app.manage(LogDir(dir));
             tauri::async_runtime::spawn(bridge::run(
                 construct_client::ClientConfig {
                     server_url: config.server,
@@ -130,6 +218,11 @@ fn main() {
             safety_number,
             mint_invite,
             logout,
+            reveal_recovery_phrase,
+            confirm_recovery_copy,
+            enter_recovery_phrase,
+            open_logs,
+            logs_path,
         ])
         .run(tauri::generate_context!())
         .expect("the Tauri runtime failed to start");

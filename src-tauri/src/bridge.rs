@@ -9,7 +9,7 @@
 
 use construct_client::{
     ClientCommand, ClientConfig, ClientEvent, ClientHandle, bridge::BridgeEvent,
-    config::SessionState, local_store::StoredMessage,
+    config::SessionState, local_store::StoredMessage, recovery::RecoveryState,
 };
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -31,6 +31,19 @@ pub enum ViewEvent {
         user_id: String,
         device_id: String,
         server: String,
+        version: String,
+    },
+    /// Where the account's recovery key stands for this device.
+    Recovery {
+        state: RecoveryView,
+    },
+    /// The phrase, shown because the person asked to make its copy. The window drops it when the
+    /// dialog closes; the copy is checked by the client.
+    RecoveryPhrase {
+        words: Vec<String>,
+    },
+    RecoveryFailed {
+        reason: String,
     },
     Chats {
         chats: Vec<ChatRow>,
@@ -89,6 +102,26 @@ pub enum ViewEvent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub enum RecoveryView {
+    Unknown,
+    CopyPending,
+    Ready,
+    NeedsPhrase,
+}
+
+impl From<RecoveryState> for RecoveryView {
+    fn from(state: RecoveryState) -> Self {
+        match state {
+            RecoveryState::Unknown => Self::Unknown,
+            RecoveryState::CopyPending => Self::CopyPending,
+            RecoveryState::Ready => Self::Ready,
+            RecoveryState::NeedsPhrase => Self::NeedsPhrase,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum Screen {
     Starting,
     Onboarding,
@@ -137,6 +170,9 @@ pub enum Intent {
     DeleteContact(String),
     SafetyNumber(String),
     MintInvite,
+    RevealRecoveryPhrase,
+    ConfirmRecoveryCopy(Vec<(usize, String)>),
+    EnterRecoveryPhrase(Zeroizing<String>),
     Logout,
 }
 
@@ -158,6 +194,7 @@ struct Model {
     open_chat: Option<String>,
     connected: bool,
     link_code: Option<String>,
+    recovery: RecoveryView,
 }
 
 impl Model {
@@ -196,6 +233,7 @@ pub async fn run(config: ClientConfig, mut intents: mpsc::UnboundedReceiver<Inte
         open_chat: None,
         connected: false,
         link_code: None,
+        recovery: RecoveryView::Unknown,
     };
     model.screen = match construct_client::stored_session_state() {
         SessionState::Encrypted => Screen::Unlock,
@@ -317,6 +355,13 @@ fn handle_intent(
         Intent::DeleteContact(peer_id) => client.send(ClientCommand::DeleteContact { peer_id }),
         Intent::SafetyNumber(contact_id) => client.send(ClientCommand::SafetyNumber { contact_id }),
         Intent::MintInvite => client.send(ClientCommand::MintInvite),
+        Intent::RevealRecoveryPhrase => client.send(ClientCommand::RevealRecoveryPhrase),
+        Intent::ConfirmRecoveryCopy(answers) => {
+            client.send(ClientCommand::ConfirmRecoveryCopy { answers })
+        }
+        Intent::EnterRecoveryPhrase(phrase) => {
+            client.send(ClientCommand::EnterRecoveryPhrase(phrase))
+        }
         Intent::Logout => client.send(ClientCommand::Logout),
     }
 }
@@ -333,6 +378,9 @@ fn snapshot(model: &Model) -> Vec<ViewEvent> {
     });
     events.push(ViewEvent::Connection {
         connected: model.connected,
+    });
+    events.push(ViewEvent::Recovery {
+        state: model.recovery,
     });
     if let Some(code) = &model.link_code {
         events.push(ViewEvent::LinkCode {
@@ -357,6 +405,7 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
                 user_id: info.user_id,
                 device_id: info.device_id,
                 server: server.to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
             };
             model.account = Some(account.clone());
             vec![account]
@@ -500,12 +549,25 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             model.open_chat = None;
             model.account = None;
             model.link_code = None;
+            model.recovery = RecoveryView::Unknown;
             vec![
                 screen(model, Screen::Onboarding),
                 ViewEvent::Chats { chats: Vec::new() },
             ]
         }
         ClientEvent::Notice(text) => vec![notice(text, false)],
+        ClientEvent::Recovery(state) => {
+            model.recovery = state.into();
+            vec![ViewEvent::Recovery {
+                state: model.recovery,
+            }]
+        }
+        ClientEvent::RecoveryPhrase(Ok(phrase)) => vec![ViewEvent::RecoveryPhrase {
+            words: phrase.split_whitespace().map(String::from).collect(),
+        }],
+        ClientEvent::RecoveryPhrase(Err(reason)) | ClientEvent::RecoveryFailed(reason) => {
+            vec![ViewEvent::RecoveryFailed { reason }]
+        }
     }
 }
 
@@ -665,6 +727,7 @@ mod tests {
             open_chat: None,
             connected: true,
             link_code: None,
+            recovery: RecoveryView::Unknown,
         }
     }
 
@@ -722,6 +785,36 @@ mod tests {
             ViewEvent::Unvouched { peer_id, devices: 2 } if peer_id == "bob"
         ));
         assert!(m.sorted_chats()[0].unvouched);
+    }
+
+    #[test]
+    fn the_recovery_state_is_kept_for_a_reloaded_page_and_the_phrase_is_not() {
+        let mut m = model();
+        on_client_event(
+            ClientEvent::Recovery(RecoveryState::CopyPending),
+            &mut m,
+            "s",
+        );
+        let out = on_client_event(
+            ClientEvent::RecoveryPhrase(Ok(Zeroizing::new("a b c".into()))),
+            &mut m,
+            "s",
+        );
+        assert!(
+            matches!(&out[0], ViewEvent::RecoveryPhrase { words } if words == &["a", "b", "c"])
+        );
+        let replay = snapshot(&m);
+        assert!(replay.iter().any(|e| matches!(
+            e,
+            ViewEvent::Recovery {
+                state: RecoveryView::CopyPending
+            }
+        )));
+        assert!(
+            !replay
+                .iter()
+                .any(|e| matches!(e, ViewEvent::RecoveryPhrase { .. }))
+        );
     }
 
     #[test]

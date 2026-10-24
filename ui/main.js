@@ -37,6 +37,17 @@ const WORDS = {
     appearance: "Appearance", themeSystem: "System", themeDark: "Dark", themeLight: "Light",
     signOut: "Sign out", confirmSignOut: "Sign out and erase this device? Click again",
     today: "Today", yesterday: "Yesterday",
+    recoveryKey: "Recovery key", makeCopy: "Make a copy…", enterPhrase: "Enter the phrase…",
+    recoveryCopyPending: "Your account's key was made on this device. Write down its twelve words: they are the only way back into the account if every device is lost, and nobody, us included, can restore them.",
+    recoveryReady: "The copy is made. The phrase is no longer kept on this device.",
+    recoveryNeedsPhrase: "This account's key was made on another device. Enter its twelve words here to show your QR code and invite link.",
+    recoveryUnknown: "Not checked yet: the server could not be reached.",
+    copyHint: "Write these words down, in order, and keep them offline.",
+    writtenDown: "I've written them down", later: "Later",
+    quizHint: "Type back the words at these positions.", word: "Word {n}", check: "Check",
+    quizWrong: "Those words don't match. Look at your copy again.", copyConfirmed: "Copy confirmed",
+    enterHint: "The twelve words, in order, separated by spaces.", save: "Save", phraseAccepted: "Phrase accepted",
+    about: "About", version: "Version", logs: "Logs", openLogs: "Open logs folder",
     unvouchedToast: "{name} has a device none of their other devices confirmed. Open the chat to verify.",
     unvouchedBanner: "{name} has a device none of their other devices confirmed. It may be theirs, or someone else's.",
     compareSafety: "Compare safety numbers", unvouchedTitle: "Unconfirmed device",
@@ -67,6 +78,17 @@ const WORDS = {
     appearance: "Внешний вид", themeSystem: "Как в системе", themeDark: "Тёмная", themeLight: "Светлая",
     signOut: "Выйти", confirmSignOut: "Выйти и стереть данные устройства? Нажмите ещё раз",
     today: "Сегодня", yesterday: "Вчера",
+    recoveryKey: "Ключ восстановления", makeCopy: "Сделать копию…", enterPhrase: "Ввести фразу…",
+    recoveryCopyPending: "Ключ аккаунта создан на этом устройстве. Запишите его двенадцать слов: только по ним можно вернуть аккаунт, если пропадут все устройства, и никто, включая нас, их не восстановит.",
+    recoveryReady: "Копия сделана. Фраза на этом устройстве больше не хранится.",
+    recoveryNeedsPhrase: "Ключ этого аккаунта создан на другом устройстве. Введите здесь его двенадцать слов, чтобы показывать свой QR-код и ссылку-приглашение.",
+    recoveryUnknown: "Ещё не проверено: сервер недоступен.",
+    copyHint: "Запишите эти слова по порядку и храните не в сети.",
+    writtenDown: "Я записал", later: "Позже",
+    quizHint: "Введите слова, стоящие на этих местах.", word: "Слово {n}", check: "Проверить",
+    quizWrong: "Слова не совпадают. Сверьтесь с записью.", copyConfirmed: "Копия подтверждена",
+    enterHint: "Двенадцать слов по порядку через пробел.", save: "Сохранить", phraseAccepted: "Фраза принята",
+    about: "О приложении", version: "Версия", logs: "Логи", openLogs: "Открыть папку с логами",
     unvouchedToast: "У {name} появилось устройство, которое не подтвердило ни одно другое устройство этого аккаунта. Откройте чат, чтобы проверить.",
     unvouchedBanner: "У {name} появилось устройство, которое не подтвердило ни одно другое устройство этого аккаунта. Возможно, оно не принадлежит собеседнику.",
     compareSafety: "Сравнить защитные числа", unvouchedTitle: "Неподтверждённое устройство",
@@ -182,6 +204,7 @@ const state = {
   open: null,
   messages: new Map(), // peerId → [{id, text, sent, time, delivered}]
   account: null,
+  recovery: "unknown",
   filter: "",
   invite: null,
   link: null,
@@ -485,6 +508,9 @@ function openSettings() {
   $("set-user").textContent = state.account?.userId ?? "";
   $("set-device").textContent = state.account?.deviceId ?? "";
   $("set-server").textContent = state.account?.server ?? "";
+  $("set-version").textContent = state.account?.version ?? "";
+  invoke("logs_path").then((path) => ($("set-logs").textContent = path)).catch(() => {});
+  renderRecovery();
   markTheme();
   $("dlg-settings").showModal();
 }
@@ -494,6 +520,106 @@ $("sign-out").addEventListener("click", (ev) =>
     invoke("logout");
   }),
 );
+
+$("open-logs").addEventListener("click", () => invoke("open_logs").catch((e) => toast(String(e), true)));
+
+// ── Recovery key ────────────────────────────────────────────────────────────
+
+const RECOVERY_TEXT = {
+  copyPending: "recoveryCopyPending", ready: "recoveryReady",
+  needsPhrase: "recoveryNeedsPhrase", unknown: "recoveryUnknown",
+};
+
+function renderRecovery() {
+  $("recovery-status").textContent = t(RECOVERY_TEXT[state.recovery]);
+  $("recovery-show").hidden = state.recovery !== "copyPending";
+  $("recovery-enter").hidden = state.recovery !== "needsPhrase";
+  $("open-settings").classList.toggle("attention", state.recovery === "copyPending");
+}
+
+function recoveryPane(name) {
+  for (const p of document.querySelectorAll(".recovery-pane")) p.hidden = p.dataset.pane !== name;
+}
+
+/** The words leave the page when the dialog closes, whichever way it closes. */
+function forgetPhrase() {
+  $("recovery-words").replaceChildren();
+  $("recovery-questions").replaceChildren();
+  $("recovery-phrase").value = "";
+  $("recovery-quiz-error").hidden = true;
+  $("recovery-enter-error").hidden = true;
+}
+$("dlg-recovery").addEventListener("close", forgetPhrase);
+
+$("recovery-show").addEventListener("click", () => {
+  forgetPhrase();
+  invoke("reveal_recovery_phrase");
+});
+$("recovery-enter").addEventListener("click", () => {
+  forgetPhrase();
+  recoveryPane("enter");
+  $("dlg-recovery").showModal();
+  $("recovery-phrase").focus();
+});
+
+function showWords(words) {
+  $("recovery-words").replaceChildren(...words.map((w) => el("li", "", w)));
+  $("recovery-words").dataset.count = String(words.length);
+  recoveryPane("words");
+  if (!$("dlg-recovery").open) $("dlg-recovery").showModal();
+}
+
+$("recovery-written").addEventListener("click", () => {
+  const count = Number($("recovery-words").dataset.count) || 12;
+  const picks = new Set();
+  while (picks.size < 3) picks.add(Math.floor(Math.random() * count));
+  $("recovery-questions").replaceChildren(
+    ...[...picks].sort((a, b) => a - b).map((i) => {
+      const label = el("label");
+      const input = el("input", "field mono");
+      input.dataset.index = String(i);
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      label.append(el("span", "", t("word", { n: i + 1 })), input);
+      return label;
+    }),
+  );
+  // Out of sight while answering.
+  $("recovery-words").replaceChildren();
+  recoveryPane("quiz");
+  $("recovery-questions").querySelector("input").focus();
+});
+$("recovery-back").addEventListener("click", () => invoke("reveal_recovery_phrase"));
+$("recovery-quiz").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const answers = [...$("recovery-questions").querySelectorAll("input")].map((i) => [Number(i.dataset.index), i.value]);
+  invoke("confirm_recovery_copy", { answers });
+});
+$("recovery-enter-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  invoke("enter_recovery_phrase", { phrase: $("recovery-phrase").value });
+});
+
+function onRecovery(next) {
+  const was = state.recovery;
+  state.recovery = next;
+  renderRecovery();
+  if ($("dlg-recovery").open && next === "ready" && was !== "ready") {
+    $("dlg-recovery").close();
+    toast(t(was === "copyPending" ? "copyConfirmed" : "phraseAccepted"));
+  }
+}
+
+function onRecoveryFailed(reason) {
+  const quiz = !$("recovery-quiz").hidden && $("dlg-recovery").open;
+  const box = quiz ? $("recovery-quiz-error") : $("recovery-enter-error");
+  if ($("dlg-recovery").open) {
+    box.textContent = quiz ? t("quizWrong") : reason;
+    box.hidden = false;
+  } else {
+    toast(reason, true);
+  }
+}
 
 // ── Theme ───────────────────────────────────────────────────────────────────
 
@@ -618,6 +744,9 @@ function onEvent(e) {
       }
       break;
     case "unvouched": toast(t("unvouchedToast", { name: chatName(e.peerId) }), true); break;
+    case "recovery": onRecovery(e.state); break;
+    case "recoveryPhrase": showWords(e.words); break;
+    case "recoveryFailed": onRecoveryFailed(e.reason); break;
     case "notice": toast(e.text, e.error); break;
   }
 }
