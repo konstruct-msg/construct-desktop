@@ -32,6 +32,8 @@ pub enum ViewEvent {
         screen: Screen,
     },
     Account {
+        /// The name generated from the account id, as every client computes it.
+        name: String,
         user_id: String,
         device_id: String,
         server: String,
@@ -121,6 +123,13 @@ pub enum ViewEvent {
         peer_id: String,
         devices: usize,
     },
+    /// The account as the settings screen shows it.
+    Settings {
+        username: Option<String>,
+        devices: Vec<DeviceRow>,
+        delivery_receipts: bool,
+        discoverable: Option<bool>,
+    },
     /// A one-line message: `error` for failures.
     Notice {
         text: String,
@@ -193,6 +202,17 @@ pub struct MessageRow {
     pub media: Vec<MediaRow>,
 }
 
+/// A device of our account in the settings screen.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceRow {
+    pub id: String,
+    /// Unix milliseconds; 0 when the server does not say.
+    pub created: i64,
+    pub current: bool,
+    pub primary: bool,
+}
+
 /// A file of a message, before it is fetched: enough to draw its place.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -256,6 +276,15 @@ pub enum Intent {
         bytes: Vec<u8>,
         caption: String,
     },
+    /// The window gained or lost the focus.
+    Focus(bool),
+    Notifications(Notifications),
+    LoadSettings,
+    ChangeUsername(String),
+    SetDiscoverable(bool),
+    SetDeliveryReceipts(bool),
+    /// Sign out another device; `None`: every other one.
+    RevokeDevices(Option<String>),
     /// Show file `index` of a message.
     LoadMedia {
         message_id: String,
@@ -305,6 +334,77 @@ struct Model {
     downloads: std::path::PathBuf,
     /// Files asked for to be saved, not shown: (message, index).
     saving: std::collections::HashSet<(String, usize)>,
+    /// How a message that arrives is announced to the system, as the page last set it.
+    notify: Notifications,
+    /// The window has the focus: a message in the open chat is then seen, not announced.
+    focused: bool,
+}
+
+/// The person's choice of what a notification of a new message says. Kept by the page with its
+/// other settings and handed here at each start and change.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Notifications {
+    pub enabled: bool,
+    /// `nameAndMessage`, `nameOnly` or `none`, as iOS names them.
+    pub preview: String,
+    /// "New message", in the page's language.
+    pub new_message: String,
+}
+
+impl Default for Notifications {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            preview: "nameAndMessage".into(),
+            new_message: "New message".into(),
+        }
+    }
+}
+
+/// What the system is asked to show for a message that arrived, or nothing: notifications off,
+/// our own message, or one in the chat the person is looking at.
+fn notification(model: &Model, peer_id: &str, row: &MessageRow) -> Option<(String, String)> {
+    let n = &model.notify;
+    let watching = model.focused && model.open_chat.as_deref() == Some(peer_id);
+    if !n.enabled || row.sent || watching {
+        return None;
+    }
+    let name = model
+        .chats
+        .iter()
+        .find(|c| c.peer_id == peer_id)
+        .map_or_else(
+            || construct_client::names::generated(peer_id),
+            |c| c.name.clone(),
+        );
+    Some(match n.preview.as_str() {
+        "nameAndMessage" => (name, preview(row)),
+        "nameOnly" => (name, n.new_message.clone()),
+        _ => ("Konstruct".into(), n.new_message.clone()),
+    })
+}
+
+/// Off the async runtime: on Linux the call goes over D-Bus and may wait on the daemon.
+#[cfg(not(target_os = "macos"))]
+fn show_notification(title: String, body: String) {
+    std::thread::spawn(move || {
+        match notify_rust::Notification::new()
+            .appname("Konstruct")
+            .summary(&title)
+            .body(&body)
+            .show()
+        {
+            Ok(_) => tracing::debug!("notification shown"),
+            Err(e) => tracing::warn!("notification not shown: {e}"),
+        }
+    });
+}
+
+/// macOS is not a target; the window there is for development.
+#[cfg(target_os = "macos")]
+fn show_notification(_title: String, _body: String) {
+    tracing::debug!("notification left out on macOS");
 }
 
 impl Model {
@@ -314,7 +414,7 @@ impl Model {
         }
         self.chats.push(ChatRow {
             peer_id: peer_id.to_string(),
-            name: short_id(peer_id),
+            name: construct_client::names::generated(peer_id),
             preview: String::new(),
             time: 0,
             unread: 0,
@@ -351,6 +451,8 @@ pub async fn run(
         me: String::new(),
         downloads,
         saving: Default::default(),
+        notify: Notifications::default(),
+        focused: true,
     };
     model.screen = match construct_client::stored_session_state() {
         SessionState::Encrypted => Screen::Unlock,
@@ -497,6 +599,13 @@ fn handle_intent(
             bytes,
             caption,
         }),
+        Intent::Focus(focused) => model.focused = focused,
+        Intent::Notifications(notify) => model.notify = notify,
+        Intent::LoadSettings => client.send(ClientCommand::LoadSettings),
+        Intent::ChangeUsername(name) => client.send(ClientCommand::ChangeUsername(name)),
+        Intent::SetDiscoverable(on) => client.send(ClientCommand::SetDiscoverable(on)),
+        Intent::SetDeliveryReceipts(on) => client.send(ClientCommand::SetDeliveryReceipts(on)),
+        Intent::RevokeDevices(id) => client.send(ClientCommand::RevokeDevices(id)),
         Intent::LoadMedia { message_id, index } => {
             client.send(ClientCommand::LoadMedia { message_id, index })
         }
@@ -560,6 +669,7 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             }
             model.me = info.user_id.clone();
             let account = ViewEvent::Account {
+                name: construct_client::names::generated(&info.user_id),
                 user_id: info.user_id,
                 device_id: info.device_id,
                 server: server.to_string(),
@@ -620,7 +730,8 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
         }],
         ClientEvent::ContactSearchError(reason) => vec![notice(reason, true)],
         ClientEvent::ContactAdded { user_id, username } => {
-            model.chat_mut(&user_id).name = username;
+            model.chat_mut(&user_id).name =
+                construct_client::names::resolved("", &username, &user_id);
             vec![ViewEvent::Chats {
                 chats: model.sorted_chats(),
             }]
@@ -753,6 +864,21 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             ]
         }
         ClientEvent::Notice(text) => vec![notice(text, false)],
+        ClientEvent::Settings(s) => vec![ViewEvent::Settings {
+            username: s.username,
+            devices: s
+                .devices
+                .into_iter()
+                .map(|d| DeviceRow {
+                    current: d.is_current || d.device_id == own_device(model),
+                    id: d.device_id,
+                    created: d.created_at.saturating_mul(1000),
+                    primary: d.is_primary,
+                })
+                .collect(),
+            delivery_receipts: s.delivery_receipts,
+            discoverable: s.discoverable,
+        }],
         ClientEvent::Recovery(state) => {
             model.recovery = state.into();
             vec![ViewEvent::Recovery {
@@ -791,6 +917,9 @@ fn on_bridge_event(event: BridgeEvent, model: &mut Model) -> Vec<ViewEvent> {
         BridgeEvent::NewMessage { message } | BridgeEvent::OwnMessage { message } => {
             let peer_id = message.peer_id.clone();
             let row = message_row(message, &model.me);
+            if let Some((title, body)) = notification(model, &peer_id, &row) {
+                show_notification(title, body);
+            }
             incoming(model, peer_id, row)
         }
         BridgeEvent::MessageChanged { message } => vec![ViewEvent::MessageChanged {
@@ -989,12 +1118,16 @@ fn preview(row: &MessageRow) -> String {
     }
 }
 
-fn notice(text: String, error: bool) -> ViewEvent {
-    ViewEvent::Notice { text, error }
+/// This device's id, from the account the page was told of.
+fn own_device(model: &Model) -> String {
+    match &model.account {
+        Some(ViewEvent::Account { device_id, .. }) => device_id.clone(),
+        _ => String::new(),
+    }
 }
 
-fn short_id(id: &str) -> String {
-    format!("{}…", &id[..8.min(id.len())])
+fn notice(text: String, error: bool) -> ViewEvent {
+    ViewEvent::Notice { text, error }
 }
 
 fn now_ms() -> i64 {
@@ -1054,6 +1187,8 @@ mod tests {
             me: "me".into(),
             downloads: std::env::temp_dir(),
             saving: Default::default(),
+            notify: Notifications::default(),
+            focused: true,
         }
     }
 
@@ -1290,5 +1425,64 @@ mod tests {
             "once only"
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn row(text: &str, sent: bool) -> MessageRow {
+        MessageRow {
+            id: "m".into(),
+            text: text.into(),
+            sent,
+            time: 1,
+            delivered: false,
+            edited: false,
+            quote: None,
+            attachment: None,
+            reactions: Vec::new(),
+            media: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_notification_says_what_the_person_chose() {
+        let mut model = model();
+        model.chat_mut("bob").name = "Bob".into();
+        model.focused = false;
+        let says = |model: &Model| notification(model, "bob", &row("hi there", false));
+        assert_eq!(says(&model), Some(("Bob".into(), "hi there".into())));
+        model.notify.preview = "nameOnly".into();
+        assert_eq!(says(&model), Some(("Bob".into(), "New message".into())));
+        model.notify.preview = "none".into();
+        assert_eq!(
+            says(&model),
+            Some(("Konstruct".into(), "New message".into()))
+        );
+        model.notify.enabled = false;
+        assert_eq!(says(&model), None);
+    }
+
+    #[test]
+    fn a_message_being_looked_at_or_our_own_is_not_announced() {
+        let mut model = model();
+        model.open_chat = Some("bob".into());
+        model.focused = true;
+        assert_eq!(
+            notification(&model, "bob", &row("hi", false)),
+            None,
+            "on screen"
+        );
+        assert!(
+            notification(&model, "carol", &row("hi", false)).is_some(),
+            "another chat"
+        );
+        model.focused = false;
+        assert!(
+            notification(&model, "bob", &row("hi", false)).is_some(),
+            "window away"
+        );
+        assert_eq!(
+            notification(&model, "bob", &row("hi", true)),
+            None,
+            "our own"
+        );
     }
 }

@@ -156,37 +156,101 @@
     </div>
   </dialog>
 
-  <!-- Settings -->
-  <dialog id="dlg-settings" class="sheet">
-    <h2 class="headline" data-t="settings"></h2>
-    <h3 class="section" data-t="account"></h3>
-    <dl class="facts">
-      <dt data-t="accountId"></dt><dd class="mono" id="set-user"></dd>
-      <dt data-t="deviceId"></dt><dd class="mono" id="set-device"></dd>
-      <dt data-t="server"></dt><dd class="mono" id="set-server"></dd>
-    </dl>
-    <h3 class="section" data-t="recoveryKey"></h3>
-    <p id="recovery-status" class="small"></p>
-    <div class="row">
-      <button type="button" class="secondary" id="recovery-show" data-t="makeCopy" hidden></button>
-      <button type="button" class="secondary" id="recovery-enter" data-t="enterPhrase" hidden></button>
-    </div>
-    <h3 class="section" data-t="appearance"></h3>
-    <div class="row" id="theme-choice">
-      <button type="button" class="tab" data-theme-choice="system" data-t="themeSystem"></button>
-      <button type="button" class="tab" data-theme-choice="dark" data-t="themeDark"></button>
-      <button type="button" class="tab" data-theme-choice="light" data-t="themeLight"></button>
-    </div>
-    <h3 class="section" data-t="about"></h3>
-    <dl class="facts">
-      <dt data-t="version"></dt><dd class="mono" id="set-version"></dd>
-      <dt data-t="logs"></dt><dd class="mono small" id="set-logs"></dd>
-    </dl>
-    <div class="row"><button type="button" class="secondary" id="open-logs" data-t="openLogs"></button></div>
-    <div class="row end">
-      <button type="button" class="danger-link" id="sign-out" data-t="signOut"></button>
+  <!-- Settings: sections on the left, the chosen one on the right -->
+  <dialog id="dlg-settings" class="sheet settings">
+    <nav class="settings-nav" id="settings-nav">
+      <h2 class="headline" data-t="settings"></h2>
+      <button type="button" data-pane="profile" data-t="profile"></button>
+      <button type="button" data-pane="devices" data-t="devices"></button>
+      <button type="button" data-pane="chats" data-t="chatsAndLook"></button>
+      <button type="button" data-pane="privacy" data-t="notificationsAndPrivacy"></button>
+      <button type="button" data-pane="recovery" data-t="recoveryKey"></button>
+      <button type="button" data-pane="about" data-t="about"></button>
       <span class="spacer"></span>
-      <button type="button" class="secondary" data-close data-t="close"></button>
+      <button type="button" class="danger-link" id="sign-out" data-t="signOut"></button>
+    </nav>
+    <div class="settings-body">
+      <section class="settings-pane" data-pane="profile">
+        <h3 class="section" data-t="profile"></h3>
+        <div class="profile-head">
+          <div id="set-avatar"></div>
+          <div>
+            <div class="profile-name" id="set-name"></div>
+            <div class="dim" id="set-username"></div>
+            <div class="small dim mono" id="set-user"></div>
+          </div>
+        </div>
+        <form class="row field-row" id="username-form">
+          <input class="field" id="username-input" autocomplete="off" spellcheck="false" maxlength="21" data-tp="usernamePlaceholder">
+          <button type="submit" class="secondary" data-t="saveUsername"></button>
+        </form>
+        <p class="small dim" data-t="usernameHint"></p>
+        <label class="toggle"><input type="checkbox" id="set-discoverable"><span data-t="discoverable"></span></label>
+        <p class="small dim" id="discoverable-hint"></p>
+        <dl class="facts">
+          <dt data-t="deviceId"></dt><dd class="mono" id="set-device"></dd>
+          <dt data-t="server"></dt><dd class="mono" id="set-server"></dd>
+        </dl>
+      </section>
+      <section class="settings-pane" data-pane="devices" hidden>
+        <h3 class="section" data-t="devices"></h3>
+        <p class="small dim" data-t="devicesHint"></p>
+        <ul class="devices" id="set-devices"></ul>
+        <div class="row"><button type="button" class="secondary" id="revoke-others" data-t="revokeOthers"></button></div>
+      </section>
+      <section class="settings-pane" data-pane="chats" hidden>
+        <h3 class="section" data-t="appearance"></h3>
+        <div class="row choice" id="theme-choice">
+          <button type="button" class="tab" data-theme-choice="system" data-t="themeSystem"></button>
+          <button type="button" class="tab" data-theme-choice="dark" data-t="themeDark"></button>
+          <button type="button" class="tab" data-theme-choice="light" data-t="themeLight"></button>
+        </div>
+        <h3 class="section" data-t="textSize"></h3>
+        <div class="row choice" data-pref="textSize">
+          <button type="button" class="tab" data-value="compact" data-t="textCompact"></button>
+          <button type="button" class="tab" data-value="standard" data-t="textStandard"></button>
+          <button type="button" class="tab" data-value="large" data-t="textLarge"></button>
+        </div>
+        <h3 class="section" data-t="language"></h3>
+        <div class="row choice" data-pref="lang">
+          <button type="button" class="tab" data-value="auto" data-t="langAuto"></button>
+          <button type="button" class="tab" data-value="ru">Русский</button>
+          <button type="button" class="tab" data-value="en">English</button>
+        </div>
+        <h3 class="section" data-t="chatsSection"></h3>
+        <label class="toggle"><input type="checkbox" data-pref-flag="sendOnEnter"><span data-t="sendOnEnter"></span></label>
+        <p class="small dim" data-t="sendOnEnterHint"></p>
+        <label class="toggle"><input type="checkbox" data-pref-flag="showTimes"><span data-t="showTimes"></span></label>
+      </section>
+      <section class="settings-pane" data-pane="privacy" hidden>
+        <h3 class="section" data-t="notifications"></h3>
+        <label class="toggle"><input type="checkbox" data-pref-flag="notify"><span data-t="notifyOn"></span></label>
+        <div class="previews" data-pref="preview">
+          <button type="button" class="tab" data-value="nameAndMessage"><b data-t="previewNameAndMessage"></b><span class="small dim" data-t="previewNameAndMessageHint"></span></button>
+          <button type="button" class="tab" data-value="nameOnly"><b data-t="previewNameOnly"></b><span class="small dim" data-t="previewNameOnlyHint"></span></button>
+          <button type="button" class="tab" data-value="none"><b data-t="previewNone"></b><span class="small dim" data-t="previewNoneHint"></span></button>
+        </div>
+        <h3 class="section" data-t="privacy"></h3>
+        <label class="toggle"><input type="checkbox" id="set-receipts"><span data-t="deliveryReceipts"></span></label>
+        <p class="small dim" data-t="deliveryReceiptsHint"></p>
+      </section>
+      <section class="settings-pane" data-pane="recovery" hidden>
+        <h3 class="section" data-t="recoveryKey"></h3>
+        <p id="recovery-status" class="small"></p>
+        <div class="row">
+          <button type="button" class="secondary" id="recovery-show" data-t="makeCopy" hidden></button>
+          <button type="button" class="secondary" id="recovery-enter" data-t="enterPhrase" hidden></button>
+        </div>
+      </section>
+      <section class="settings-pane" data-pane="about" hidden>
+        <h3 class="section" data-t="about"></h3>
+        <dl class="facts">
+          <dt data-t="version"></dt><dd class="mono" id="set-version"></dd>
+          <dt data-t="logs"></dt><dd class="mono small" id="set-logs"></dd>
+        </dl>
+        <div class="row"><button type="button" class="secondary" id="open-logs" data-t="openLogs"></button></div>
+      </section>
+      <div class="row end"><button type="button" class="secondary" data-close data-t="close"></button></div>
     </div>
   </dialog>
 
