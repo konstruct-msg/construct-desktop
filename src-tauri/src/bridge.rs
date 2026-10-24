@@ -74,6 +74,12 @@ pub enum ViewEvent {
         image: Option<String>,
         error: Option<String>,
     },
+    /// Devices of this contact's account that none of its trusted devices vouched for: the
+    /// moment to tell the person. The chat row keeps `unvouched` for the banner.
+    Unvouched {
+        peer_id: String,
+        devices: usize,
+    },
     /// A one-line message: `error` for failures.
     Notice {
         text: String,
@@ -102,6 +108,8 @@ pub struct ChatRow {
     /// Unix milliseconds of the last message, 0 when none.
     pub time: i64,
     pub unread: u32,
+    /// A device of this account nobody it trusts vouched for was seen while the app ran.
+    pub unvouched: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -163,6 +171,7 @@ impl Model {
             preview: String::new(),
             time: 0,
             unread: 0,
+            unvouched: false,
         });
         self.chats.last_mut().expect("just pushed")
     }
@@ -398,6 +407,7 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
                     preview: String::new(),
                     time: 0,
                     unread: 0,
+                    unvouched: false,
                 })
                 .collect(),
         }],
@@ -565,6 +575,22 @@ fn on_bridge_event(event: BridgeEvent, model: &mut Model) -> Vec<ViewEvent> {
             vec![notice(text, true)]
         }
         BridgeEvent::SessionReady { .. } => Vec::new(),
+        // Only told, never blocked: the devices still receive messages (owner, 2026-10-23).
+        BridgeEvent::UnvouchedDevices {
+            peer_id,
+            device_ids,
+        } => {
+            model.chat_mut(&peer_id).unvouched = true;
+            vec![
+                ViewEvent::Unvouched {
+                    peer_id,
+                    devices: device_ids.len(),
+                },
+                ViewEvent::Chats {
+                    chats: model.sorted_chats(),
+                },
+            ]
+        }
     }
 }
 
@@ -679,6 +705,23 @@ mod tests {
             &mut m,
         );
         assert_eq!(m.chats[0].unread, 0);
+    }
+
+    #[test]
+    fn an_unvouched_device_is_told_and_marks_the_chat() {
+        let mut m = model();
+        let out = on_bridge_event(
+            BridgeEvent::UnvouchedDevices {
+                peer_id: "bob".into(),
+                device_ids: vec!["d1".into(), "d2".into()],
+            },
+            &mut m,
+        );
+        assert!(matches!(
+            &out[0],
+            ViewEvent::Unvouched { peer_id, devices: 2 } if peer_id == "bob"
+        ));
+        assert!(m.sorted_chats()[0].unvouched);
     }
 
     #[test]
