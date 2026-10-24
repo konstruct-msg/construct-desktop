@@ -136,6 +136,8 @@ pub enum ViewEvent {
         /// Our picture, as `Avatar`'s.
         avatar: Option<String>,
         username: Option<String>,
+        /// What this device calls itself to the account's others.
+        device_name: String,
         devices: Vec<DeviceRow>,
         delivery_receipts: bool,
         discoverable: Option<bool>,
@@ -192,6 +194,8 @@ pub struct ChatRow {
     pub unvouched: bool,
     /// We share our profile with them.
     pub sharing: bool,
+    /// The name we gave them ourselves.
+    pub alias: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -223,6 +227,10 @@ pub struct DeviceRow {
     pub created: i64,
     pub current: bool,
     pub primary: bool,
+    /// What it calls itself, when a copy was sealed to this device.
+    pub name: Option<String>,
+    /// `ios`, `android`, `desktop`, … or empty.
+    pub platform: &'static str,
 }
 
 /// A file of a message, before it is fetched: enough to draw its place.
@@ -306,6 +314,11 @@ pub enum Intent {
         peer_id: String,
         on: bool,
     },
+    SetAlias {
+        peer_id: String,
+        alias: Option<String>,
+    },
+    RenameDevice(String),
     /// Show file `index` of a message.
     LoadMedia {
         message_id: String,
@@ -443,6 +456,7 @@ impl Model {
             unread: 0,
             unvouched: false,
             sharing: false,
+            alias: None,
         });
         self.chats.last_mut().expect("just pushed")
     }
@@ -642,6 +656,11 @@ fn handle_intent(
             contact_id: peer_id,
             on,
         }),
+        Intent::SetAlias { peer_id, alias } => client.send(ClientCommand::SetAlias {
+            contact_id: peer_id,
+            alias,
+        }),
+        Intent::RenameDevice(name) => client.send(ClientCommand::RenameDevice(name)),
         Intent::LoadMedia { message_id, index } => {
             client.send(ClientCommand::LoadMedia { message_id, index })
         }
@@ -726,6 +745,7 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
                 let chat = model.chat_mut(&contact.user_id);
                 chat.name = contact.display_name;
                 chat.sharing = contact.sharing;
+                chat.alias = contact.alias;
                 if let Some(url) = contact.avatar.as_deref().and_then(avatar_uri) {
                     model.avatars.insert(contact.user_id.clone(), url.clone());
                     avatars.push(ViewEvent::Avatar {
@@ -780,13 +800,14 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
                     unread: 0,
                     unvouched: false,
                     sharing: false,
+                    alias: None,
                 })
                 .collect(),
         }],
         ClientEvent::ContactSearchError(reason) => vec![notice(reason, true)],
         ClientEvent::ContactAdded { user_id, username } => {
             model.chat_mut(&user_id).name =
-                construct_client::names::resolved("", &username, &user_id);
+                construct_client::names::resolved(None, "", &username, &user_id);
             vec![ViewEvent::Chats {
                 chats: model.sorted_chats(),
             }]
@@ -923,14 +944,17 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             display_name: s.display_name,
             avatar: s.avatar.as_deref().and_then(avatar_uri),
             username: s.username,
+            device_name: s.device_name,
             devices: s
                 .devices
                 .into_iter()
-                .map(|d| DeviceRow {
-                    current: d.is_current || d.device_id == own_device(model),
-                    id: d.device_id,
-                    created: d.created_at.saturating_mul(1000),
-                    primary: d.is_primary,
+                .map(|e| DeviceRow {
+                    current: e.device.is_current || e.device.device_id == own_device(model),
+                    name: e.description.as_ref().map(|d| d.name.clone()),
+                    platform: e.description.map_or("", |d| d.platform),
+                    id: e.device.device_id,
+                    created: e.device.created_at.saturating_mul(1000),
+                    primary: e.device.is_primary,
                 })
                 .collect(),
             delivery_receipts: s.delivery_receipts,
@@ -995,6 +1019,7 @@ fn on_bridge_event(event: BridgeEvent, model: &mut Model) -> Vec<ViewEvent> {
             let chat = model.chat_mut(&contact.user_id);
             chat.name = contact.display_name;
             chat.sharing = contact.sharing;
+            chat.alias = contact.alias;
             let url = contact.avatar.as_deref().and_then(avatar_uri);
             match &url {
                 Some(url) => model.avatars.insert(contact.user_id.clone(), url.clone()),
