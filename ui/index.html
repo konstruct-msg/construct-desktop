@@ -43,7 +43,9 @@
       <p class="dim" data-t="linkHint"></p>
       <div class="qr-frame"><img id="link-qr" alt="" hidden><div id="link-wait" class="dim small" data-t="making"></div></div>
       <p id="link-error" class="error" hidden></p>
+      <p class="small dim" id="link-copy-hint" data-t="linkCopyHint" hidden></p>
       <div class="row">
+        <button type="button" id="link-copy" class="secondary" data-t="copyCode" hidden></button>
         <button type="button" id="link-retry" class="secondary" data-t="newCode" hidden></button>
         <button type="button" id="link-back" class="secondary" data-t="back"></button>
       </div>
@@ -231,6 +233,14 @@
         <h3 class="section" data-t="allDevices"></h3>
         <ul class="devices" id="set-devices"></ul>
         <div class="row"><button type="button" class="secondary" id="revoke-others" data-t="revokeOthers"></button></div>
+        <h3 class="section" data-t="linkDevice"></h3>
+        <div class="row"><button type="button" class="secondary" id="offer-link" data-t="showLinkCode"></button></div>
+        <p class="small dim" data-t="showLinkCodeHint"></p>
+        <form class="row field-row" id="approve-form">
+          <input class="field mono" id="approve-input" autocomplete="off" spellcheck="false" data-tp="approvePlaceholder">
+          <button type="submit" class="secondary" data-t="approve"></button>
+        </form>
+        <p class="small dim" data-t="approveHint"></p>
       </section>
       <section class="settings-pane" data-pane="chats" hidden>
         <h3 class="section" data-t="appearance"></h3>
@@ -351,6 +361,19 @@
         <button type="submit" class="primary" data-t="save"></button>
       </div>
     </form>
+  </dialog>
+
+  <!-- A code a new device scans to join this account (Flow A) -->
+  <dialog id="dlg-link-offer" class="sheet">
+    <h2 class="headline" data-t="linkDevice"></h2>
+    <p class="small" data-t="offerHint"></p>
+    <div class="qr-frame"><img id="offer-qr" alt="" hidden><div id="offer-wait" class="dim small" data-t="making"></div></div>
+    <p id="offer-status" class="small dim"></p>
+    <p id="offer-error" class="error small" hidden></p>
+    <div class="row end">
+      <button type="button" class="secondary" id="offer-retry" data-t="newCode" hidden></button>
+      <button type="button" class="secondary" id="offer-close" data-t="cancel"></button>
+    </div>
   </dialog>
 
   <!-- Deleting the account: a countdown that can be stopped, as on iOS -->

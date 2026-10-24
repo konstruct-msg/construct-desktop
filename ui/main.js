@@ -48,6 +48,13 @@ const WORDS = {
     quizWrong: "Those words don't match. Look at your copy again.", copyConfirmed: "Copy confirmed",
     enterHint: "The twelve words, in order, separated by spaces.", save: "Save", phraseAccepted: "Phrase accepted",
     about: "About", version: "Version", logs: "Logs", openLogs: "Open logs folder",
+    linkDevice: "Link a device", showLinkCode: "Show a code for a new device",
+    showLinkCodeHint: "The new device scans it when it signs in to an existing account. This device then vouches for it to your contacts.",
+    approvePlaceholder: "konstruct://link-to-me?…", approve: "Link",
+    approveHint: "If the new device shows its own code instead (another computer: Copy code), paste it here.",
+    offerHint: "On the new device, sign in to an existing account and scan this code. Whoever sees it can join your account: show it to no one.",
+    offerValid: "Valid for {time}", offerWaiting: "Waiting for the device…", deviceLinked: "Device {id} linked",
+    copyCode: "Copy code", linkCopyHint: "To link to another computer: paste this code in its Settings → Devices.",
     connectionLabel: "Connection", fingerprint: "Key fingerprint", clickToCopy: "Click to copy",
     fingerprintHint: "Your identity key, short. Someone who reads the same digits on their side has your key.",
     dangerZone: "Danger zone", signOutEverywhere: "Sign out everywhere",
@@ -153,6 +160,13 @@ const WORDS = {
     quizWrong: "Слова не совпадают. Сверьтесь с записью.", copyConfirmed: "Копия подтверждена",
     enterHint: "Двенадцать слов по порядку через пробел.", save: "Сохранить", phraseAccepted: "Фраза принята",
     about: "О приложении", version: "Версия", logs: "Логи", openLogs: "Открыть папку с логами",
+    linkDevice: "Привязать устройство", showLinkCode: "Показать код для нового устройства",
+    showLinkCodeHint: "Новое устройство сканирует его при входе в существующий аккаунт. Затем это устройство подтверждает его вашим собеседникам.",
+    approvePlaceholder: "konstruct://link-to-me?…", approve: "Привязать",
+    approveHint: "Если новое устройство показывает свой код (другой компьютер: «Скопировать код»), вставьте его сюда.",
+    offerHint: "На новом устройстве войдите в существующий аккаунт и отсканируйте этот код. Кто его увидит, сможет войти в ваш аккаунт: никому его не показывайте.",
+    offerValid: "Действует ещё {time}", offerWaiting: "Жду устройство…", deviceLinked: "Устройство {id} привязано",
+    copyCode: "Скопировать код", linkCopyHint: "Чтобы привязать к другому компьютеру, вставьте этот код в его Настройки → Устройства.",
     connectionLabel: "Соединение", fingerprint: "Отпечаток ключа", clickToCopy: "Нажмите, чтобы скопировать",
     fingerprintHint: "Ваш ключ личности, коротко. Если у собеседника те же цифры, у него ваш ключ.",
     dangerZone: "Опасная зона", signOutEverywhere: "Выйти на всех устройствах",
@@ -381,6 +395,9 @@ function showScreen(screen) {
     $("alias").focus();
   }
   if (screen === "link") {
+    state.linkCode = null;
+    $("link-copy").hidden = true;
+    $("link-copy-hint").hidden = true;
     $("link-qr").hidden = true;
     $("link-wait").hidden = false;
     $("link-error").hidden = true;
@@ -1268,6 +1285,77 @@ function renderConnection() {
   $("set-connection").textContent = t(state.connected ? "online" : "offline");
 }
 
+// ── Linking a device from here ──────────────────────────────────────────────
+
+let offerTimer = null;
+function startOffer() {
+  clearInterval(offerTimer);
+  $("offer-qr").hidden = true;
+  $("offer-qr").removeAttribute("src");
+  $("offer-wait").hidden = false;
+  $("offer-status").textContent = "";
+  $("offer-error").hidden = true;
+  $("offer-retry").hidden = true;
+  invoke("offer_link");
+}
+function stopOffer() {
+  clearInterval(offerTimer);
+  offerTimer = null;
+  // The image carries the code's secret: it does not outlive the dialog.
+  $("offer-qr").removeAttribute("src");
+  $("offer-qr").hidden = true;
+}
+function onLinkOffer(e) {
+  if (!$("dlg-link-offer").open) return invoke("cancel_link_offer");
+  $("offer-qr").src = e.image;
+  $("offer-qr").hidden = false;
+  $("offer-wait").hidden = true;
+  const tick = () => {
+    const left = Math.max(0, Math.round((e.expiresAt - Date.now()) / 1000));
+    const time = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+    $("offer-status").textContent = `${t("offerValid", { time })} · ${t("offerWaiting")}`;
+  };
+  tick();
+  clearInterval(offerTimer);
+  offerTimer = setInterval(tick, 1000);
+}
+function onLinkOfferEnded(e) {
+  stopOffer();
+  if (e.device) {
+    $("dlg-link-offer").close();
+    return toast(t("deviceLinked", { id: e.device.slice(0, 8) }));
+  }
+  $("offer-wait").hidden = true;
+  $("offer-status").textContent = "";
+  $("offer-error").textContent = e.error;
+  $("offer-error").hidden = false;
+  $("offer-retry").hidden = false;
+}
+$("offer-link").addEventListener("click", () => {
+  $("dlg-link-offer").showModal();
+  startOffer();
+});
+$("offer-retry").addEventListener("click", startOffer);
+$("offer-close").addEventListener("click", () => $("dlg-link-offer").close());
+$("dlg-link-offer").addEventListener("close", () => {
+  stopOffer();
+  invoke("cancel_link_offer");
+});
+$("approve-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const code = $("approve-input").value.trim();
+  if (!code) return;
+  invoke("approve_device", { code });
+  $("approve-input").value = "";
+});
+$("link-copy").addEventListener("click", async () => {
+  if (!state.linkCode) return;
+  try {
+    await navigator.clipboard.writeText(state.linkCode);
+    toast(t("copied"));
+  } catch {}
+});
+
 // ── Leaving: everywhere, or with the account ────────────────────────────────
 
 $("sign-out-everywhere").addEventListener("click", (ev) =>
@@ -1528,8 +1616,13 @@ function onEvent(e) {
       break;
     }
     case "deleteFailed": onDeleteFailed(e.reason); break;
+    case "linkOffer": onLinkOffer(e); break;
+    case "linkOfferEnded": onLinkOfferEnded(e); break;
     case "registrationStep": setRegistration(e.done, e.total, e.label); break;
     case "linkCode":
+      state.linkCode = e.code;
+      $("link-copy").hidden = false;
+      $("link-copy-hint").hidden = false;
       $("link-qr").src = e.image;
       $("link-qr").hidden = false;
       $("link-wait").hidden = true;
@@ -1537,6 +1630,9 @@ function onEvent(e) {
       $("link-retry").hidden = true;
       break;
     case "linkFailed":
+      state.linkCode = null;
+      $("link-copy").hidden = true;
+      $("link-copy-hint").hidden = true;
       $("link-qr").hidden = true;
       $("link-wait").hidden = true;
       $("link-error").textContent = e.reason;
