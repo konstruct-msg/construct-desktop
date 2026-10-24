@@ -70,7 +70,7 @@ const WORDS = {
     discoverable: "People can find me by username",
     discoverableNeedsName: "Choose a username first.",
     discoverableHint: "Off: only people you gave an invite link or QR code can write to you.",
-    devicesHint: "Devices signed in to this account. Their names are not shown here yet.",
+    devicesHint: "Devices signed in to this account.",
     thisDevice: "This device", mainDevice: "Main device", deviceAdded: "added {date}",
     deviceName: "Device {id}", revoke: "Sign out", confirmRevoke: "Sign it out? Click again",
     revokeOthers: "Sign out all other devices", confirmRevokeOthers: "Sign out every other device? Click again",
@@ -91,6 +91,11 @@ const WORDS = {
     shareProfile: "Share my name and photo",
     shareProfileHint: "They get your profile now, and again whenever you change it.",
     photoUnreadable: "This picture could not be read", photoSending: "Photo saved; contacts get it shortly",
+    thisDeviceName: "This device's name", allDevices: "All devices",
+    deviceNameHint: "The account's other devices see it; it is sealed to them, the server cannot read it.",
+    platform_ios: "iPhone", platform_android: "Android", platform_desktop: "Computer",
+    platform_web: "Web", platform_bot: "Bot", unnamedDevice: "Not named yet",
+    aliasPlaceholder: "Your name for them", aliasHint: "Only you see it; it stays on this device.",
   },
   ru: {
     appTitle: "КОНСТРУКТ", starting: "Открываю…",
@@ -152,7 +157,7 @@ const WORDS = {
     discoverable: "Меня можно найти по имени пользователя",
     discoverableNeedsName: "Сначала выберите имя пользователя.",
     discoverableHint: "Выключено: написать вам смогут только те, кому вы дали ссылку-приглашение или QR-код.",
-    devicesHint: "Устройства, в которых открыт этот аккаунт. Их названия здесь пока не показываются.",
+    devicesHint: "Устройства, в которых открыт этот аккаунт.",
     thisDevice: "Это устройство", mainDevice: "Основное устройство", deviceAdded: "добавлено {date}",
     deviceName: "Устройство {id}", revoke: "Отключить", confirmRevoke: "Отключить? Нажмите ещё раз",
     revokeOthers: "Отключить все остальные устройства", confirmRevokeOthers: "Отключить все остальные? Нажмите ещё раз",
@@ -173,6 +178,11 @@ const WORDS = {
     shareProfile: "Делиться моим именем и фото",
     shareProfileHint: "Профиль придёт им сейчас и потом при каждом изменении.",
     photoUnreadable: "Эту картинку не удалось прочитать", photoSending: "Фото сохранено, контакты скоро его получат",
+    thisDeviceName: "Имя этого устройства", allDevices: "Все устройства",
+    deviceNameHint: "Его видят другие устройства аккаунта: оно зашифровано для них, сервер его не читает.",
+    platform_ios: "iPhone", platform_android: "Android", platform_desktop: "Компьютер",
+    platform_web: "Веб", platform_bot: "Бот", unnamedDevice: "Пока без имени",
+    aliasPlaceholder: "Ваше имя для собеседника", aliasHint: "Его видите только вы, оно хранится на этом устройстве.",
   },
 };
 // The language chosen in settings, or the system's. A change reloads the page.
@@ -926,7 +936,10 @@ function openInfo() {
   $("info-name").textContent = chatName(peer);
   $("info-id").textContent = peer;
   $("info-hint").textContent = t("safetyHint", { name: chatName(peer) });
-  $("info-share").checked = Boolean(state.chats.find((c) => c.peerId === peer)?.sharing);
+  const chat = state.chats.find((c) => c.peerId === peer);
+  $("info-share").checked = Boolean(chat?.sharing);
+  $("alias-input").value = chat?.alias ?? "";
+  $("alias-input").placeholder = t("aliasPlaceholder");
   $("safety").replaceChildren();
   invoke("safety_number", { peerId: peer });
   $("dlg-info").showModal();
@@ -1036,6 +1049,7 @@ function renderAccountSettings() {
   discoverable.checked = Boolean(s?.discoverable);
   discoverable.disabled = !s || !name;
   $("discoverable-hint").textContent = s && !name ? t("discoverableNeedsName") : t("discoverableHint");
+  if (s && document.activeElement !== $("device-name-input")) $("device-name-input").value = s.deviceName;
   $("set-receipts").checked = s ? s.deliveryReceipts : true;
   $("set-receipts").disabled = !s;
 
@@ -1045,8 +1059,9 @@ function renderAccountSettings() {
   list.replaceChildren(...devices.map((d) => {
     const li = el("li");
     const label = el("div", "device-label");
-    label.append(el("span", "", t("deviceName", { id: d.id.slice(0, 8) })));
-    const facts = [d.current ? t("thisDevice") : "", d.primary ? t("mainDevice") : ""].filter(Boolean).join(" · ");
+    label.append(el("span", "", d.name || t("deviceName", { id: d.id.slice(0, 8) })));
+    const facts = [d.current ? t("thisDevice") : "", d.primary ? t("mainDevice") : "",
+      d.platform ? t(`platform_${d.platform}`) : "", d.name ? d.id.slice(0, 8) : ""].filter(Boolean).join(" · ");
     if (facts) label.append(el("span", "device-badge", facts));
     if (d.created) label.append(el("span", "small dim", t("deviceAdded", { date: new Date(d.created).toLocaleDateString(LANG) })));
     li.append(label);
@@ -1061,6 +1076,17 @@ function renderAccountSettings() {
   }));
   $("revoke-others").hidden = !devices.some((d) => !d.current && !d.primary);
 }
+
+$("alias-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  if (!state.open) return;
+  invoke("set_alias", { peerId: state.open, alias: $("alias-input").value.trim() });
+});
+$("device-name-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const name = $("device-name-input").value.trim();
+  if (name && name !== state.settings?.deviceName) invoke("rename_device", { name });
+});
 
 $("info-share").addEventListener("change", (ev) => {
   if (state.open) invoke("share_profile", { peerId: state.open, on: ev.target.checked });
@@ -1312,6 +1338,7 @@ function onEvent(e) {
       renderChats();
       if (state.open) {
         $("chat-name").textContent = chatName(state.open);
+        if ($("dlg-info").open) $("info-name").textContent = chatName(state.open);
         renderAlarm();
       }
       break;

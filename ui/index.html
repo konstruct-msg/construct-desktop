@@ -146,6 +146,11 @@
   <dialog id="dlg-info" class="sheet">
     <div class="row"><span id="info-avatar"></span><h2 id="info-name" class="headline"></h2></div>
     <p class="mono small dim" id="info-id"></p>
+    <form class="row field-row" id="alias-form">
+      <input class="field" id="alias-input" autocomplete="off" maxlength="50">
+      <button type="submit" class="secondary" data-t="saveUsername"></button>
+    </form>
+    <p class="small dim" data-t="aliasHint"></p>
     <label class="toggle"><input type="checkbox" id="info-share"><span data-t="shareProfile"></span></label>
     <p class="small dim" data-t="shareProfileHint"></p>
     <h3 class="section" data-t="safetyNumbers"></h3>
@@ -208,7 +213,13 @@
       </section>
       <section class="settings-pane" data-pane="devices" hidden>
         <h3 class="section" data-t="devices"></h3>
-        <p class="small dim" data-t="devicesHint"></p>
+        <h3 class="section" data-t="thisDeviceName"></h3>
+        <form class="row field-row" id="device-name-form">
+          <input class="field" id="device-name-input" autocomplete="off" maxlength="40">
+          <button type="submit" class="secondary" data-t="saveUsername"></button>
+        </form>
+        <p class="small dim" data-t="deviceNameHint"></p>
+        <h3 class="section" data-t="allDevices"></h3>
         <ul class="devices" id="set-devices"></ul>
         <div class="row"><button type="button" class="secondary" id="revoke-others" data-t="revokeOthers"></button></div>
       </section>

@@ -198,6 +198,18 @@ fn remove_avatar(intents: State<Intents>) {
     });
 }
 
+/// Our own name for a contact; empty removes it.
+#[tauri::command]
+fn set_alias(peer_id: String, alias: String, intents: State<Intents>) {
+    let alias = (!alias.trim().is_empty()).then_some(alias);
+    intents.send(Intent::SetAlias { peer_id, alias });
+}
+
+#[tauri::command]
+fn rename_device(name: String, intents: State<Intents>) {
+    intents.send(Intent::RenameDevice(name));
+}
+
 #[tauri::command]
 fn share_profile(peer_id: String, on: bool, intents: State<Intents>) {
     intents.send(Intent::ShareProfile { peer_id, on });
@@ -399,6 +411,8 @@ fn main() {
             set_avatar,
             remove_avatar,
             share_profile,
+            set_alias,
+            rename_device,
             load_media,
             save_media,
             open_downloads,
