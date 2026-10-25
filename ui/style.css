@@ -124,6 +124,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 .column { display: flex; flex-direction: column; gap: 12px; width: 360px; text-align: center; }
 .column .field { text-align: left; }
 .tagline { margin: 0 0 8px; }
+/* The first screen breathes, as on macOS: logo, name, line, then what to do. */
+#onboarding-form .logo { margin-bottom: 36px; }
+#onboarding-form .wordmark { margin-bottom: 28px; }
+#onboarding-form .tagline { margin-bottom: 64px; }
+#onboarding-form .primary { margin-top: 4px; }
 /* Sizes as on iOS (CTLogoView): splash 72, onboarding 100, lock 140. */
 .logo { width: 72px; height: 72px; margin: 0 auto; flex: none; color: var(--text); }
 .logo.large { width: 100px; height: 100px; }
