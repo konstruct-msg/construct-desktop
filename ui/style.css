@@ -124,10 +124,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 .column { display: flex; flex-direction: column; gap: 12px; width: 360px; text-align: center; }
 .column .field { text-align: left; }
 .tagline { margin: 0 0 8px; }
-.logo { width: 72px; height: 72px; margin: 0 auto; border-radius: 18px;
-        border: 2px solid var(--accent); position: relative; }
-.logo::after { content: ""; position: absolute; inset: 22px; border-radius: 4px;
-               background: var(--accent); }
+/* Sizes as on iOS (CTLogoView): splash 72, onboarding 100, lock 140. */
+.logo { width: 72px; height: 72px; margin: 0 auto; flex: none; color: var(--text); }
+.logo.large { width: 100px; height: 100px; }
+.logo.huge { width: 140px; height: 140px; }
+.logo.accent { color: var(--accent); }
 .progress { height: 4px; border-radius: 2px; background: var(--noise); overflow: hidden; }
 .progress div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
 .qr-frame { width: 236px; height: 236px; margin: 8px auto; border-radius: 8px; background: #fff;

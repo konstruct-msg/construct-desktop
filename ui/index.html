@@ -6,9 +6,17 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- The logo, as iOS has it (KonstructLogo): one shape, coloured by where it stands -->
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <symbol id="logo-mark" viewBox="0 0 1024 1024">
+      <path fill="currentColor" d="M 720.2 228.7 C 659.8 228.7 606.9 295.7 577.8 396 C 567 433.1 514.7 435.4 500.5 399.4 L 433.3 228.7 C 402.8 150.2 356.2 100 303.9 100 C 211.8 100 137.2 255.7 137.2 447.7 C 137.2 639.7 211.8 795.4 303.9 795.4 C 330.4 795.4 355.5 782.4 377.7 759.3 L 379.7 757.3 C 447.5 692.9 558.4 717.8 594 803.7 C 624.6 877.4 669.7 924 720.1 924 C 812.1 924 886.7 768.3 886.7 576.3 C 886.7 384.2 812.1 228.5 720.1 228.5 Z M 720.2 228.7"/>
+    </symbol>
+  </svg>
+
   <!-- Starting: restoring the session -->
   <section id="screen-starting" class="screen centered" hidden>
     <div class="column">
+      <svg class="logo accent" aria-hidden="true"><use href="#logo-mark"/></svg>
       <div class="wordmark" data-t="appTitle"></div>
       <p class="dim" data-t="starting"></p>
     </div>
@@ -17,7 +25,7 @@
   <!-- Onboarding -->
   <section id="screen-onboarding" class="screen centered" hidden>
     <form class="column" id="onboarding-form">
-      <div class="logo" aria-hidden="true"></div>
+      <svg class="logo large" aria-hidden="true"><use href="#logo-mark"/></svg>
       <div class="wordmark" data-t="appTitle"></div>
       <p class="dim tagline" data-t="tagline"></p>
       <input id="alias" class="field" autocomplete="off" spellcheck="false" data-tp="aliasPlaceholder">
@@ -65,6 +73,7 @@
   <!-- The app lock: over everything, while the window is locked -->
   <section id="lock-screen" class="lock-screen centered" hidden>
     <form class="column" id="lock-form">
+      <svg class="logo accent huge" aria-hidden="true"><use href="#logo-mark"/></svg>
       <div class="wordmark" data-t="appTitle"></div>
       <p class="dim" data-t="lockHint"></p>
       <input id="lock-code" type="password" class="field" autocomplete="off">
