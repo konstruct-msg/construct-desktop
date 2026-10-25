@@ -23,6 +23,7 @@
       <input id="alias" class="field" autocomplete="off" spellcheck="false" data-tp="aliasPlaceholder">
       <button type="submit" class="primary" data-t="createIdentity"></button>
       <button type="button" class="link" id="go-link" data-t="linkThisDevice"></button>
+      <button type="button" class="link small dim save-logs" data-t="saveLogs"></button>
     </form>
   </section>
 
@@ -59,6 +60,7 @@
       <p id="passphrase-hint" class="dim"></p>
       <input id="passphrase" type="password" class="field" autocomplete="current-password">
       <button type="submit" class="primary" id="passphrase-submit"></button>
+      <button type="button" class="link small dim save-logs" data-t="saveLogs"></button>
     </form>
   </section>
 
@@ -187,6 +189,7 @@
       <button type="button" data-pane="privacy" data-t="notificationsAndPrivacy"></button>
       <button type="button" data-pane="storage" data-t="dataAndStorage"></button>
       <button type="button" data-pane="recovery" data-t="recoveryKey"></button>
+      <button type="button" data-pane="diagnostics" data-t="diagnostics"></button>
       <button type="button" data-pane="about" data-t="about"></button>
       <span class="spacer"></span>
       <button type="button" class="danger-link" id="sign-out" data-t="signOut"></button>
@@ -371,9 +374,22 @@
           <dt data-t="version"></dt><dd class="mono" id="set-version"></dd>
           <dt data-t="connectionLabel"></dt><dd id="set-connection"></dd>
           <dt data-t="server"></dt><dd class="mono" id="set-server"></dd>
-          <dt data-t="logs"></dt><dd class="mono small" id="set-logs"></dd>
         </dl>
-        <div class="row"><button type="button" class="secondary" id="open-logs" data-t="openLogs"></button></div>
+      </section>
+      <section class="settings-pane" data-pane="diagnostics" hidden>
+        <h3 class="section" data-t="diagnostics"></h3>
+        <p class="small dim" data-t="diagnosticsHint"></p>
+        <dl class="facts">
+          <dt data-t="logs"></dt><dd class="mono small" id="set-logs"></dd>
+          <dt data-t="logsSize"></dt><dd id="logs-size"></dd>
+        </dl>
+        <div class="row wrap">
+          <button type="button" class="primary save-logs" data-t="saveLogs"></button>
+          <button type="button" class="secondary" id="open-logs" data-t="openLogs"></button>
+          <button type="button" class="secondary" id="clear-logs" data-t="clearLogs"></button>
+        </div>
+        <h3 class="section" data-t="recentLogs"></h3>
+        <pre class="log-tail" id="logs-recent"></pre>
       </section>
       <div class="row end"><button type="button" class="secondary" data-close data-t="close"></button></div>
     </div>
