@@ -177,6 +177,16 @@ pub enum ViewEvent {
         media: usize,
         file: Option<String>,
     },
+    /// A transfer over the local network, this device `sending` or receiving: `state` is
+    /// `waiting`, `moving` (sending), `receiving`, `done`, `skipped` or `failed` (with `error`);
+    /// what was sent, when done. Receiving starts by itself: the client listens while signed in.
+    HistoryNearby {
+        sending: bool,
+        state: &'static str,
+        error: Option<String>,
+        messages: usize,
+        media: usize,
+    },
     /// The app lock closed the window: the page drops what it shows and asks for the code.
     Locked,
     /// The code matched; the page is drawn again from what follows.
@@ -409,6 +419,9 @@ pub enum Intent {
     ExportHistory(String),
     /// A history file the person chose, its bytes.
     ImportHistory(Vec<u8>),
+    /// Send this device's history to `device_id` over the local network.
+    OfferHistoryNearby(String),
+    CancelHistoryNearby,
     RevokeInvites(Vec<String>),
     UnlockApp(Zeroizing<String>),
     SetAppLock {
@@ -463,6 +476,8 @@ struct Model {
     lock: Lock,
     /// The copy of a history file the client is reading.
     importing: Option<std::path::PathBuf>,
+    /// A transfer over the local network under way: whether this device sends.
+    nearby: Option<bool>,
 }
 
 /// The app lock as this window keeps it. While `locked`, the page is sent nothing of the account
@@ -671,6 +686,7 @@ pub async fn run(
         avatars: Default::default(),
         lock: Lock::default(),
         importing: None,
+        nearby: None,
     };
     model.screen = match construct_client::stored_session_state() {
         SessionState::Encrypted => Screen::Unlock,
@@ -881,6 +897,14 @@ fn handle_intent(
                 }
                 Err(e) => send(view, notice(format!("History not imported: {e}"), true)),
             }
+        }
+        Intent::OfferHistoryNearby(device_id) => {
+            model.nearby = Some(true);
+            client.send(ClientCommand::OfferHistoryNearby { device_id });
+        }
+        Intent::CancelHistoryNearby => {
+            model.nearby = None;
+            client.send(ClientCommand::CancelHistoryNearby);
         }
         Intent::RevokeInvites(jtis) => client.send(ClientCommand::RevokeInvites(jtis)),
         Intent::SetAppLock {
@@ -1315,7 +1339,7 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             if let Some(path) = model.importing.take() {
                 let _ = std::fs::remove_file(path);
             }
-            vec![match result {
+            let mut out = vec![match result {
                 Ok(s) => ViewEvent::HistoryTransfer {
                     exported: false,
                     error: None,
@@ -1324,6 +1348,40 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
                     file: None,
                 },
                 Err(e) => history_failed(false, e),
+            }];
+            // History received over the network lands as an import; that ends the transfer.
+            if model.nearby == Some(false) {
+                model.nearby = None;
+                out.push(nearby_step(false, "done", None, None));
+            }
+            out
+        }
+        ClientEvent::HistoryNearby(step) => {
+            use construct_client::history::NearbyStep;
+            // Another device started sending here: that is a transfer under way.
+            if step == NearbyStep::Receiving {
+                model.nearby = Some(false);
+            }
+            // A step after a cancel is the stopped task's last word: not shown.
+            let Some(sending) = model.nearby else {
+                return Vec::new();
+            };
+            vec![match step {
+                NearbyStep::Waiting => nearby_step(sending, "waiting", None, None),
+                NearbyStep::Moving => nearby_step(sending, "moving", None, None),
+                NearbyStep::Receiving => nearby_step(false, "receiving", None, None),
+                NearbyStep::Sent(s) => {
+                    model.nearby = None;
+                    nearby_step(sending, "done", None, Some(s))
+                }
+                NearbyStep::Skipped => {
+                    model.nearby = None;
+                    nearby_step(sending, "skipped", None, None)
+                }
+                NearbyStep::Failed(e) => {
+                    model.nearby = None;
+                    nearby_step(sending, "failed", Some(e), None)
+                }
             }]
         }
         ClientEvent::Recovery(state) => {
@@ -1541,6 +1599,22 @@ fn history_failed(exported: bool, error: String) -> ViewEvent {
     }
 }
 
+fn nearby_step(
+    sending: bool,
+    state: &'static str,
+    error: Option<String>,
+    sent: Option<construct_client::history::HistorySummary>,
+) -> ViewEvent {
+    let sent = sent.unwrap_or_default();
+    ViewEvent::HistoryNearby {
+        sending,
+        state,
+        error,
+        messages: sent.messages,
+        media: sent.media,
+    }
+}
+
 /// `dir/stem.ext`, or `stem (n).ext` when that is taken.
 fn free_path(dir: &std::path::Path, stem: &str, ext: &str) -> std::io::Result<std::path::PathBuf> {
     std::fs::create_dir_all(dir)?;
@@ -1697,6 +1771,7 @@ mod tests {
             avatars: Default::default(),
             lock: Lock::default(),
             importing: None,
+            nearby: None,
         }
     }
 
@@ -1844,6 +1919,55 @@ mod tests {
                 ..
             }]
         ));
+    }
+
+    #[test]
+    fn history_arriving_over_the_network_is_shown_until_it_lands_and_a_cancelled_one_says_nothing()
+    {
+        use construct_client::history::{HistorySummary, NearbyStep};
+        let mut model = model();
+        let outs = on_client_event(
+            ClientEvent::HistoryNearby(NearbyStep::Receiving),
+            &mut model,
+            "",
+        );
+        assert!(
+            matches!(
+                outs.as_slice(),
+                [ViewEvent::HistoryNearby {
+                    sending: false,
+                    state: "receiving",
+                    ..
+                }]
+            ),
+            "a transfer nobody started here is shown when it arrives"
+        );
+        let summary = HistorySummary {
+            messages: 8,
+            ..Default::default()
+        };
+        let outs = on_client_event(ClientEvent::HistoryImported(Ok(summary)), &mut model, "");
+        assert!(
+            matches!(
+                outs.as_slice(),
+                [
+                    ViewEvent::HistoryTransfer { messages: 8, .. },
+                    ViewEvent::HistoryNearby {
+                        sending: false,
+                        state: "done",
+                        ..
+                    }
+                ]
+            ),
+            "the import is shown and the transfer ends"
+        );
+        assert_eq!(model.nearby, None);
+        let outs = on_client_event(
+            ClientEvent::HistoryNearby(NearbyStep::Failed("cancelled".into())),
+            &mut model,
+            "",
+        );
+        assert!(outs.is_empty(), "nothing is under way: nothing to show");
     }
 
     #[test]
