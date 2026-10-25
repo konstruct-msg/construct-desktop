@@ -178,7 +178,8 @@ pub enum ViewEvent {
         file: Option<String>,
     },
     /// A transfer over the local network, this device `sending` or receiving: `state` is
-    /// `waiting`, `moving`, `done`, `skipped` or `failed` (with `error`); what was sent, when done.
+    /// `waiting`, `moving` (sending), `receiving`, `done`, `skipped` or `failed` (with `error`);
+    /// what was sent, when done. Receiving starts by itself: the client listens while signed in.
     HistoryNearby {
         sending: bool,
         state: &'static str,
@@ -420,8 +421,6 @@ pub enum Intent {
     ImportHistory(Vec<u8>),
     /// Send this device's history to `device_id` over the local network.
     OfferHistoryNearby(String),
-    /// Take history another device of the account offers over the local network.
-    ReceiveHistoryNearby,
     CancelHistoryNearby,
     RevokeInvites(Vec<String>),
     UnlockApp(Zeroizing<String>),
@@ -903,10 +902,6 @@ fn handle_intent(
             model.nearby = Some(true);
             client.send(ClientCommand::OfferHistoryNearby { device_id });
         }
-        Intent::ReceiveHistoryNearby => {
-            model.nearby = Some(false);
-            client.send(ClientCommand::ReceiveHistoryNearby);
-        }
         Intent::CancelHistoryNearby => {
             model.nearby = None;
             client.send(ClientCommand::CancelHistoryNearby);
@@ -1363,6 +1358,10 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
         }
         ClientEvent::HistoryNearby(step) => {
             use construct_client::history::NearbyStep;
+            // Another device started sending here: that is a transfer under way.
+            if step == NearbyStep::Receiving {
+                model.nearby = Some(false);
+            }
             // A step after a cancel is the stopped task's last word: not shown.
             let Some(sending) = model.nearby else {
                 return Vec::new();
@@ -1370,6 +1369,7 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             vec![match step {
                 NearbyStep::Waiting => nearby_step(sending, "waiting", None, None),
                 NearbyStep::Moving => nearby_step(sending, "moving", None, None),
+                NearbyStep::Receiving => nearby_step(false, "receiving", None, None),
                 NearbyStep::Sent(s) => {
                     model.nearby = None;
                     nearby_step(sending, "done", None, Some(s))
@@ -1922,23 +1922,26 @@ mod tests {
     }
 
     #[test]
-    fn history_received_over_the_network_ends_the_transfer_and_a_cancelled_one_says_nothing() {
+    fn history_arriving_over_the_network_is_shown_until_it_lands_and_a_cancelled_one_says_nothing()
+    {
         use construct_client::history::{HistorySummary, NearbyStep};
         let mut model = model();
-        model.nearby = Some(false);
         let outs = on_client_event(
-            ClientEvent::HistoryNearby(NearbyStep::Moving),
+            ClientEvent::HistoryNearby(NearbyStep::Receiving),
             &mut model,
             "",
         );
-        assert!(matches!(
-            outs.as_slice(),
-            [ViewEvent::HistoryNearby {
-                sending: false,
-                state: "moving",
-                ..
-            }]
-        ));
+        assert!(
+            matches!(
+                outs.as_slice(),
+                [ViewEvent::HistoryNearby {
+                    sending: false,
+                    state: "receiving",
+                    ..
+                }]
+            ),
+            "a transfer nobody started here is shown when it arrives"
+        );
         let summary = HistorySummary {
             messages: 8,
             ..Default::default()

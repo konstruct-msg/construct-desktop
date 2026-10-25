@@ -134,12 +134,6 @@ fn offer_history_nearby(device_id: String, intents: State<Intents>) {
     intents.send(Intent::OfferHistoryNearby(device_id));
 }
 
-/// Take history another device of the account offers over the local network.
-#[tauri::command]
-fn receive_history_nearby(intents: State<Intents>) {
-    intents.send(Intent::ReceiveHistoryNearby);
-}
-
 #[tauri::command]
 fn cancel_history_nearby(intents: State<Intents>) {
     intents.send(Intent::CancelHistoryNearby);
@@ -549,7 +543,6 @@ fn main() {
             export_history,
             import_history,
             offer_history_nearby,
-            receive_history_nearby,
             cancel_history_nearby,
             unlock_app,
             set_app_lock,

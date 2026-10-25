@@ -64,10 +64,9 @@ const WORDS = {
     revokeInvite: "Revoke", revokeAllInvites: "Revoke all", confirmRevokeInvite: "Revoke? Click again",
     issuedInvitesHint: "An invite works once and for a few minutes. Revoke one you showed by mistake: nobody can use it then.",
     historyTransfer: "History transfer",
-    historyTransferHint: "Move your chats to another device of the account. Over Wi-Fi, with both devices on one network: \"Send over Wi-Fi\" next to the device here, \"Receive over Wi-Fi\" on it. Or as a file: \"History file\" writes one into Downloads, and that device imports it. Either way, only that device can read it.",
-    historyNearbySend: "Send over Wi-Fi", historyNearbyReceive: "Receive over Wi-Fi",
-    historyNearbyWaiting_send: "Waiting for the other device. On it, choose to receive history over Wi-Fi.",
-    historyNearbyWaiting_receive: "Looking for the other device on this network. On it, choose to send history to this device.",
+    historyTransferHint: "Move your chats to another device of the account. Over Wi-Fi, with both devices on one network: \"Send over Wi-Fi\" next to the device; it takes the history by itself while Konstruct is open on it. History sent here from your phone arrives the same way. Or as a file: \"History file\" writes one into Downloads, and that device imports it. Either way, only that device can read it.",
+    historyNearbySend: "Send over Wi-Fi", historyNearbyReceiving: "Receiving history from your other device…",
+    historyNearbyWaiting_send: "Waiting for the other device. Keep Konstruct open on it, on the same network.",
     historyNearbyMoving: "Transferring history…",
     historyNearbySent: "History sent: {messages} messages, {media} files",
     historyNearbySkipped: "The other device chose not to send history",
@@ -204,10 +203,9 @@ const WORDS = {
     revokeInvite: "Отозвать", revokeAllInvites: "Отозвать все", confirmRevokeInvite: "Отозвать? Нажмите ещё раз",
     issuedInvitesHint: "Приглашение срабатывает один раз и действует несколько минут. Отзовите показанное по ошибке, и им никто не воспользуется.",
     historyTransfer: "Перенос истории",
-    historyTransferHint: "Перенесите переписку на другое устройство аккаунта. По Wi-Fi, когда оба устройства в одной сети: здесь «Отправить по Wi-Fi» рядом с устройством, на нём «Получить по Wi-Fi». Или файлом: «Файл истории» записывает его в Загрузки, а то устройство его импортирует. В обоих случаях прочитать историю может только это устройство.",
-    historyNearbySend: "Отправить по Wi-Fi", historyNearbyReceive: "Получить по Wi-Fi",
-    historyNearbyWaiting_send: "Жду другое устройство. На нём выберите получение истории по Wi-Fi.",
-    historyNearbyWaiting_receive: "Ищу другое устройство в этой сети. На нём выберите отправку истории на это устройство.",
+    historyTransferHint: "Перенесите переписку на другое устройство аккаунта. По Wi-Fi, когда оба устройства в одной сети: «Отправить по Wi-Fi» рядом с устройством, и оно примет историю само, пока на нём открыт Konstruct. История, отправленная сюда с телефона, приходит так же. Или файлом: «Файл истории» записывает его в Загрузки, а то устройство его импортирует. В обоих случаях прочитать историю может только это устройство.",
+    historyNearbySend: "Отправить по Wi-Fi", historyNearbyReceiving: "Получаю историю с другого устройства…",
+    historyNearbyWaiting_send: "Жду другое устройство. На нём должен быть открыт Konstruct, в той же сети.",
     historyNearbyMoving: "Переношу историю…",
     historyNearbySent: "История отправлена: сообщений {messages}, файлов {media}",
     historyNearbySkipped: "Другое устройство решило не отправлять историю",
@@ -1195,7 +1193,7 @@ function renderAccountSettings() {
       const nearby = el("button", "link", t("historyNearbySend"));
       nearby.type = "button";
       nearby.addEventListener("click", () => {
-        showNearby(true, "waiting");
+        showNearby("waiting");
         invoke("offer_history_nearby", { deviceId: d.id });
       });
       li.append(nearby);
@@ -1485,34 +1483,30 @@ $("history-file").addEventListener("change", async (ev) => {
 // ── History transfer over the local network ─────────────────────────────────
 
 /// The status line of a transfer under way; `null` hides it.
-function showNearby(sending, state) {
+function showNearby(state) {
   const line = $("history-nearby");
   line.hidden = state === null;
   if (state === null) return;
-  $("history-nearby-text").textContent = state === "moving"
-    ? t("historyNearbyMoving")
-    : t(sending ? "historyNearbyWaiting_send" : "historyNearbyWaiting_receive");
-  $("history-receive").disabled = true;
+  $("history-nearby-text").textContent = {
+    waiting: t("historyNearbyWaiting_send"),
+    moving: t("historyNearbyMoving"),
+    receiving: t("historyNearbyReceiving"),
+  }[state];
 }
 
 function onHistoryNearby(e) {
-  if (e.state === "waiting" || e.state === "moving") return showNearby(e.sending, e.state);
-  showNearby(false, null);
-  $("history-receive").disabled = false;
+  if (e.state === "receiving") toast(t("historyNearbyReceiving"));
+  if (["waiting", "moving", "receiving"].includes(e.state)) return showNearby(e.state);
+  showNearby(null);
   if (e.state === "failed") toast(t("historyFailed", { error: e.error }), true);
   else if (e.state === "skipped") toast(t("historyNearbySkipped"));
   // A receive that is done was announced by its import.
   else if (e.sending) toast(t("historyNearbySent", e));
 }
 
-$("history-receive").addEventListener("click", () => {
-  showNearby(false, "waiting");
-  invoke("receive_history_nearby");
-});
 $("history-nearby-cancel").addEventListener("click", () => {
   invoke("cancel_history_nearby");
-  showNearby(false, null);
-  $("history-receive").disabled = false;
+  showNearby(null);
 });
 
 // ── Linking a device from here ──────────────────────────────────────────────
