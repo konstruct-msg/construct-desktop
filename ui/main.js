@@ -64,7 +64,13 @@ const WORDS = {
     revokeInvite: "Revoke", revokeAllInvites: "Revoke all", confirmRevokeInvite: "Revoke? Click again",
     issuedInvitesHint: "An invite works once and for a few minutes. Revoke one you showed by mistake: nobody can use it then.",
     historyTransfer: "History transfer",
-    historyTransferHint: "Move your chats to another device of the account as a file: \"History file\" next to a device writes one for it into Downloads; on that device, import it here. The file opens only on the device it was made for.",
+    historyTransferHint: "Move your chats to another device of the account. Over Wi-Fi, with both devices on one network: \"Send over Wi-Fi\" next to the device here, \"Receive over Wi-Fi\" on it. Or as a file: \"History file\" writes one into Downloads, and that device imports it. Either way, only that device can read it.",
+    historyNearbySend: "Send over Wi-Fi", historyNearbyReceive: "Receive over Wi-Fi",
+    historyNearbyWaiting_send: "Waiting for the other device. On it, choose to receive history over Wi-Fi.",
+    historyNearbyWaiting_receive: "Looking for the other device on this network. On it, choose to send history to this device.",
+    historyNearbyMoving: "Transferring history…",
+    historyNearbySent: "History sent: {messages} messages, {media} files",
+    historyNearbySkipped: "The other device chose not to send history",
     historyExport: "History file", historyImport: "Import a history file…",
     historyWriting: "Writing the history file…", historyReading: "Importing the history…",
     historyWritten: "History written: {messages} messages, {media} files → {file}. Click to show",
@@ -198,7 +204,13 @@ const WORDS = {
     revokeInvite: "Отозвать", revokeAllInvites: "Отозвать все", confirmRevokeInvite: "Отозвать? Нажмите ещё раз",
     issuedInvitesHint: "Приглашение срабатывает один раз и действует несколько минут. Отзовите показанное по ошибке, и им никто не воспользуется.",
     historyTransfer: "Перенос истории",
-    historyTransferHint: "Перенесите переписку на другое устройство аккаунта файлом: «Файл истории» рядом с устройством записывает его в Загрузки, а на том устройстве его импортируют здесь. Файл открывается только на устройстве, для которого записан.",
+    historyTransferHint: "Перенесите переписку на другое устройство аккаунта. По Wi-Fi, когда оба устройства в одной сети: здесь «Отправить по Wi-Fi» рядом с устройством, на нём «Получить по Wi-Fi». Или файлом: «Файл истории» записывает его в Загрузки, а то устройство его импортирует. В обоих случаях прочитать историю может только это устройство.",
+    historyNearbySend: "Отправить по Wi-Fi", historyNearbyReceive: "Получить по Wi-Fi",
+    historyNearbyWaiting_send: "Жду другое устройство. На нём выберите получение истории по Wi-Fi.",
+    historyNearbyWaiting_receive: "Ищу другое устройство в этой сети. На нём выберите отправку истории на это устройство.",
+    historyNearbyMoving: "Переношу историю…",
+    historyNearbySent: "История отправлена: сообщений {messages}, файлов {media}",
+    historyNearbySkipped: "Другое устройство решило не отправлять историю",
     historyExport: "Файл истории", historyImport: "Импортировать файл истории…",
     historyWriting: "Записываю файл истории…", historyReading: "Импортирую историю…",
     historyWritten: "История записана: сообщений {messages}, файлов {media} → {file}. Нажмите, чтобы показать",
@@ -1180,6 +1192,13 @@ function renderAccountSettings() {
     if (d.created) label.append(el("span", "small dim", t("deviceAdded", { date: new Date(d.created).toLocaleDateString(LANG) })));
     li.append(label);
     if (!d.current) {
+      const nearby = el("button", "link", t("historyNearbySend"));
+      nearby.type = "button";
+      nearby.addEventListener("click", () => {
+        showNearby(true, "waiting");
+        invoke("offer_history_nearby", { deviceId: d.id });
+      });
+      li.append(nearby);
       const history = el("button", "link", t("historyExport"));
       history.type = "button";
       history.addEventListener("click", () => {
@@ -1461,6 +1480,39 @@ $("history-file").addEventListener("change", async (ev) => {
   toast(t("historyReading"));
   const bytes = new Uint8Array(await file.arrayBuffer());
   invoke("import_history", bytes).catch((e) => toast(String(e), true));
+});
+
+// ── History transfer over the local network ─────────────────────────────────
+
+/// The status line of a transfer under way; `null` hides it.
+function showNearby(sending, state) {
+  const line = $("history-nearby");
+  line.hidden = state === null;
+  if (state === null) return;
+  $("history-nearby-text").textContent = state === "moving"
+    ? t("historyNearbyMoving")
+    : t(sending ? "historyNearbyWaiting_send" : "historyNearbyWaiting_receive");
+  $("history-receive").disabled = true;
+}
+
+function onHistoryNearby(e) {
+  if (e.state === "waiting" || e.state === "moving") return showNearby(e.sending, e.state);
+  showNearby(false, null);
+  $("history-receive").disabled = false;
+  if (e.state === "failed") toast(t("historyFailed", { error: e.error }), true);
+  else if (e.state === "skipped") toast(t("historyNearbySkipped"));
+  // A receive that is done was announced by its import.
+  else if (e.sending) toast(t("historyNearbySent", e));
+}
+
+$("history-receive").addEventListener("click", () => {
+  showNearby(false, "waiting");
+  invoke("receive_history_nearby");
+});
+$("history-nearby-cancel").addEventListener("click", () => {
+  invoke("cancel_history_nearby");
+  showNearby(false, null);
+  $("history-receive").disabled = false;
 });
 
 // ── Linking a device from here ──────────────────────────────────────────────
@@ -1812,6 +1864,7 @@ function onEvent(e) {
       else if (e.exported) toast(t("historyWritten", e), false, () => invoke("open_downloads"));
       else toast(t("historyImported", e));
       break;
+    case "historyNearby": onHistoryNearby(e); break;
     case "linkOfferEnded": onLinkOfferEnded(e); break;
     case "registrationStep": setRegistration(e.done, e.total, e.label); break;
     case "linkCode":

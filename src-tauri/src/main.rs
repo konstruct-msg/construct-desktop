@@ -128,6 +128,23 @@ fn import_history(request: tauri::ipc::Request<'_>, intents: State<Intents>) -> 
     Ok(())
 }
 
+/// Send this device's history to `device_id` over the local network.
+#[tauri::command]
+fn offer_history_nearby(device_id: String, intents: State<Intents>) {
+    intents.send(Intent::OfferHistoryNearby(device_id));
+}
+
+/// Take history another device of the account offers over the local network.
+#[tauri::command]
+fn receive_history_nearby(intents: State<Intents>) {
+    intents.send(Intent::ReceiveHistoryNearby);
+}
+
+#[tauri::command]
+fn cancel_history_nearby(intents: State<Intents>) {
+    intents.send(Intent::CancelHistoryNearby);
+}
+
 /// `encodeURIComponent` undone. Bytes that do not decode are kept as they came.
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
@@ -531,6 +548,9 @@ fn main() {
             lock_now,
             export_history,
             import_history,
+            offer_history_nearby,
+            receive_history_nearby,
+            cancel_history_nearby,
             unlock_app,
             set_app_lock,
             revoke_invites,
