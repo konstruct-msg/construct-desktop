@@ -6,6 +6,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bridge;
+mod logs;
 
 use bridge::{Intent, ViewEvent};
 use tauri::{Manager, State, ipc::Channel};
@@ -422,9 +423,65 @@ fn open_folder(dir: &std::path::Path) -> Result<(), String> {
         .map_err(|e| format!("{opener}: {e}"))
 }
 
+/// Settings → Diagnostics: where the logs are and how much they take.
+#[derive(serde::Serialize)]
+struct LogsInfo {
+    path: String,
+    bytes: u64,
+}
+
 #[tauri::command]
-fn logs_path(dir: State<LogDir>) -> String {
-    dir.0.display().to_string()
+async fn logs_info(dir: State<'_, LogDir>) -> Result<LogsInfo, String> {
+    let dir = dir.0.clone();
+    blocking(move || {
+        Ok(LogsInfo {
+            bytes: logs::size(&dir),
+            path: dir.display().to_string(),
+        })
+    })
+    .await
+}
+
+/// The last lines written, to read without opening the folder.
+#[tauri::command]
+async fn logs_recent(dir: State<'_, LogDir>) -> Result<String, String> {
+    let dir = dir.0.clone();
+    blocking(move || Ok(logs::recent(&dir, 200))).await
+}
+
+/// All the logs in one file in the downloads folder, to send; its name.
+#[tauri::command]
+async fn save_logs(
+    dir: State<'_, LogDir>,
+    downloads: State<'_, Downloads>,
+) -> Result<String, String> {
+    let (dir, out) = (dir.0.clone(), downloads.0.clone());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let path = blocking(move || logs::bundle(&dir, &out, now)).await?;
+    tracing::info!("logs saved to the downloads folder");
+    Ok(path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default())
+}
+
+#[tauri::command]
+async fn clear_logs(dir: State<'_, LogDir>) -> Result<(), String> {
+    let dir = dir.0.clone();
+    blocking(move || logs::clear(&dir)).await?;
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "logs cleared");
+    Ok(())
+}
+
+/// File work off the window's thread.
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Log to the terminal and to a file a day in `dir`, the last week kept: an app started from
@@ -556,7 +613,10 @@ fn main() {
             confirm_recovery_copy,
             enter_recovery_phrase,
             open_logs,
-            logs_path,
+            logs_info,
+            logs_recent,
+            save_logs,
+            clear_logs,
         ])
         .run(tauri::generate_context!())
         .expect("the Tauri runtime failed to start");

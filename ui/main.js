@@ -48,6 +48,10 @@ const WORDS = {
     quizWrong: "Those words don't match. Look at your copy again.", copyConfirmed: "Copy confirmed",
     enterHint: "The twelve words, in order, separated by spaces.", save: "Save", phraseAccepted: "Phrase accepted",
     about: "About", version: "Version", logs: "Logs", openLogs: "Open logs folder",
+    diagnostics: "Diagnostics", logsSize: "Size", saveLogs: "Save logs", clearLogs: "Clear logs",
+    recentLogs: "Recent lines", logsEmpty: "Nothing written yet", logsCleared: "Logs cleared",
+    logsSaved: "Logs saved to Downloads: {name}. Click to show the folder; attach the file to your report.",
+    diagnosticsHint: "Logs show what the app did: connections, delivery, errors. They hold no message text and no keys, and stay on this computer until you send them yourself.",
     lockHint: "Enter the code to open Konstruct.", unlock: "Unlock",
     lockWrong: "Wrong code", lockWait: "Too many wrong codes: wait {n} s",
     lockForgot: "Forgot the code? Sign out and erase this device",
@@ -187,6 +191,10 @@ const WORDS = {
     quizWrong: "Слова не совпадают. Сверьтесь с записью.", copyConfirmed: "Копия подтверждена",
     enterHint: "Двенадцать слов по порядку через пробел.", save: "Сохранить", phraseAccepted: "Фраза принята",
     about: "О приложении", version: "Версия", logs: "Логи", openLogs: "Открыть папку с логами",
+    diagnostics: "Диагностика", logsSize: "Размер", saveLogs: "Сохранить логи", clearLogs: "Очистить логи",
+    recentLogs: "Последние строки", logsEmpty: "Пока ничего не записано", logsCleared: "Логи очищены",
+    logsSaved: "Логи сохранены в «Загрузки»: {name}. Нажмите, чтобы открыть папку, и приложите файл к сообщению.",
+    diagnosticsHint: "В логах — что делало приложение: соединения, доставка, ошибки. Текста сообщений и ключей в них нет, и они остаются на этом компьютере, пока вы сами их не отправите.",
     lockHint: "Введите код, чтобы открыть Konstruct.", unlock: "Открыть",
     lockWrong: "Неверный код", lockWait: "Слишком много неверных кодов: подождите {n} с",
     lockForgot: "Забыли код? Выйти и стереть устройство",
@@ -1099,7 +1107,7 @@ function openSettings(pane = "profile") {
   $("set-account-id").textContent = state.account?.userId ?? "";
   renderConnection();
 
-  invoke("logs_path").then((path) => ($("set-logs").textContent = path)).catch(() => {});
+  renderLogs();
   renderRecovery();
   markTheme();
   markPrefs();
@@ -1110,9 +1118,37 @@ function openSettings(pane = "profile") {
   $("dlg-settings").showModal();
 }
 
+// ── Diagnostics ─────────────────────────────────────────────────────────────
+
+function renderLogs() {
+  invoke("logs_info").then((info) => {
+    $("set-logs").textContent = info.path;
+    $("logs-size").textContent = bytes(info.bytes);
+  }).catch(() => {});
+  invoke("logs_recent").then((text) => {
+    const tail = $("logs-recent");
+    tail.textContent = text || t("logsEmpty");
+    tail.scrollTop = tail.scrollHeight; // the newest at the bottom, in view
+  }).catch(() => {});
+}
+
+// Also before sign-in, from the first screens: a device that cannot get in is when they matter.
+for (const b of document.querySelectorAll(".save-logs")) {
+  b.addEventListener("click", () =>
+    invoke("save_logs")
+      .then((name) => toast(t("logsSaved", { name }), false, () => invoke("open_downloads").catch((e) => toast(String(e), true))))
+      .catch((e) => toast(String(e), true)),
+  );
+}
+
+$("clear-logs").addEventListener("click", () =>
+  invoke("clear_logs").then(() => { toast(t("logsCleared")); renderLogs(); }).catch((e) => toast(String(e), true)),
+);
+
 function showPane(name) {
   for (const p of document.querySelectorAll(".settings-pane")) p.hidden = p.dataset.pane !== name;
   for (const b of $("settings-nav").querySelectorAll("[data-pane]")) b.setAttribute("aria-current", String(b.dataset.pane === name));
+  if (name === "diagnostics") renderLogs();
 }
 $("settings-nav").addEventListener("click", (ev) => {
   const b = ev.target.closest("[data-pane]");
