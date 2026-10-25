@@ -63,6 +63,13 @@ const WORDS = {
     inviteKind_qr: "QR code and link", inviteKind_link: "Link", inviteLeft: "{time} left",
     revokeInvite: "Revoke", revokeAllInvites: "Revoke all", confirmRevokeInvite: "Revoke? Click again",
     issuedInvitesHint: "An invite works once and for a few minutes. Revoke one you showed by mistake: nobody can use it then.",
+    historyTransfer: "History transfer",
+    historyTransferHint: "Move your chats to another device of the account as a file: \"History file\" next to a device writes one for it into Downloads; on that device, import it here. The file opens only on the device it was made for.",
+    historyExport: "History file", historyImport: "Import a history file…",
+    historyWriting: "Writing the history file…", historyReading: "Importing the history…",
+    historyWritten: "History written: {messages} messages, {media} files → {file}. Click to show",
+    historyImported: "History imported: {messages} new messages, {media} files",
+    historyFailed: "History not moved: {error}",
     linkDevice: "Link a device", showLinkCode: "Show a code for a new device",
     showLinkCodeHint: "The new device scans it when it signs in to an existing account. This device then vouches for it to your contacts.",
     approvePlaceholder: "konstruct://link-to-me?…", approve: "Link",
@@ -190,6 +197,13 @@ const WORDS = {
     inviteKind_qr: "QR-код и ссылка", inviteKind_link: "Ссылка", inviteLeft: "осталось {time}",
     revokeInvite: "Отозвать", revokeAllInvites: "Отозвать все", confirmRevokeInvite: "Отозвать? Нажмите ещё раз",
     issuedInvitesHint: "Приглашение срабатывает один раз и действует несколько минут. Отзовите показанное по ошибке, и им никто не воспользуется.",
+    historyTransfer: "Перенос истории",
+    historyTransferHint: "Перенесите переписку на другое устройство аккаунта файлом: «Файл истории» рядом с устройством записывает его в Загрузки, а на том устройстве его импортируют здесь. Файл открывается только на устройстве, для которого записан.",
+    historyExport: "Файл истории", historyImport: "Импортировать файл истории…",
+    historyWriting: "Записываю файл истории…", historyReading: "Импортирую историю…",
+    historyWritten: "История записана: сообщений {messages}, файлов {media} → {file}. Нажмите, чтобы показать",
+    historyImported: "История импортирована: новых сообщений {messages}, файлов {media}",
+    historyFailed: "История не перенесена: {error}",
     linkDevice: "Привязать устройство", showLinkCode: "Показать код для нового устройства",
     showLinkCodeHint: "Новое устройство сканирует его при входе в существующий аккаунт. Затем это устройство подтверждает его вашим собеседникам.",
     approvePlaceholder: "konstruct://link-to-me?…", approve: "Привязать",
@@ -1165,6 +1179,15 @@ function renderAccountSettings() {
     if (facts) label.append(el("span", "device-badge", facts));
     if (d.created) label.append(el("span", "small dim", t("deviceAdded", { date: new Date(d.created).toLocaleDateString(LANG) })));
     li.append(label);
+    if (!d.current) {
+      const history = el("button", "link", t("historyExport"));
+      history.type = "button";
+      history.addEventListener("click", () => {
+        toast(t("historyWriting"));
+        invoke("export_history", { deviceId: d.id });
+      });
+      li.append(history);
+    }
     if (!d.current && !d.primary) {
       const revoke = el("button", "danger-link", t("revoke"));
       revoke.type = "button";
@@ -1427,6 +1450,18 @@ function renderInvites() {
 $("revoke-invites").addEventListener("click", (ev) =>
   confirmTwice(ev.currentTarget, "confirmRevokeInvite", () =>
     invoke("revoke_invites", { jtis: (state.settings?.invites ?? []).map((i) => i.jti) })));
+
+// ── History transfer by file ────────────────────────────────────────────────
+
+$("history-import").addEventListener("click", () => $("history-file").click());
+$("history-file").addEventListener("change", async (ev) => {
+  const [file] = ev.target.files;
+  ev.target.value = "";
+  if (!file) return;
+  toast(t("historyReading"));
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  invoke("import_history", bytes).catch((e) => toast(String(e), true));
+});
 
 // ── Linking a device from here ──────────────────────────────────────────────
 
@@ -1772,6 +1807,11 @@ function onEvent(e) {
       $("lock-code").select();
       break;
     case "linkOffer": onLinkOffer(e); break;
+    case "historyTransfer":
+      if (e.error) toast(t("historyFailed", { error: e.error }), true);
+      else if (e.exported) toast(t("historyWritten", e), false, () => invoke("open_downloads"));
+      else toast(t("historyImported", e));
+      break;
     case "linkOfferEnded": onLinkOfferEnded(e); break;
     case "registrationStep": setRegistration(e.done, e.total, e.label); break;
     case "linkCode":

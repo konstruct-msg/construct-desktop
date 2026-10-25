@@ -111,6 +111,23 @@ fn send_file(request: tauri::ipc::Request<'_>, intents: State<Intents>) -> Resul
     Ok(())
 }
 
+/// Write this device's history for `device_id`, another device of the account, into the
+/// downloads folder.
+#[tauri::command]
+fn export_history(device_id: String, intents: State<Intents>) {
+    intents.send(Intent::ExportHistory(device_id));
+}
+
+/// A history file the person chose: its bytes as the body.
+#[tauri::command]
+fn import_history(request: tauri::ipc::Request<'_>, intents: State<Intents>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("no file".into());
+    };
+    intents.send(Intent::ImportHistory(bytes.clone()));
+    Ok(())
+}
+
 /// `encodeURIComponent` undone. Bytes that do not decode are kept as they came.
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
@@ -512,6 +529,8 @@ fn main() {
             logout_everywhere,
             offer_link,
             lock_now,
+            export_history,
+            import_history,
             unlock_app,
             set_app_lock,
             revoke_invites,
