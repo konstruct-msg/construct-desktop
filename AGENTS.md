@@ -1,140 +1,88 @@
 # AGENTS.md — construct-desktop
 
-Konstruct for **Linux and Windows**. macOS is covered by the `Construct Desktop` target in
-construct-messenger; this repository is not for it.
+Konstruct for **Linux and Windows**: a Tauri 2 window with an HTML/CSS interface modelled on the macOS `Construct Desktop` target (macOS itself is not this repo). The program — account, keys, sessions, stream, storage — is `construct-client`; the webview draws typed view events and sends back what the person did.
 
-Decisions: `~/Code/construct-docs/decisions/desktop-web-interface.md` (the interface, since
-2026-10-23) and `desktop-is-the-tui-client-with-a-second-shell.md` (the client layer shared with
-the TUI). Read them before working here.
+If a rule here and your plan disagree, the rule wins until a `decisions/` note says otherwise.
 
-## Where to start
+## Read first
 
-The work plan, its stages and their gates, and the progress log are in the vault task
-`~/Code/construct-docs/todo/218-desktop-linux-windows-plan.md`. Read it first. Then take the
-first stage that is not done, and add a line to its «Ход» when you finish.
+| Area | Read |
+|---|---|
+| Why these rules exist; checklist before any protocol feature | `~/Code/construct-docs/decisions/rules-from-the-first-year.md` |
+| Work plan, stages, gates, progress («Ход») — take the first stage not done | `~/Code/construct-docs/todo/218-desktop-linux-windows-plan.md` |
+| The interface | `~/Code/construct-docs/decisions/desktop-web-interface.md` |
+| Client layer shared with the TUI | `~/Code/construct-docs/decisions/desktop-is-the-tui-client-with-a-second-shell.md` |
+| UI rules | `docs/UI_RULES.md` |
+| Three questions, session lifecycle | `construct-messenger/AGENTS.md` |
+| Everything else | `~/Code/construct-docs` (vault; its own `AGENTS.md` is authoritative) |
 
-State on 2026-10-23 (evening):
-
-- The window draws the real screens: `construct-screens` `App`, the same one the terminal shell
-  draws (stage 3 of the plan, first step).
-- `construct-client` builds against core 0.57 and talks sealed through the server (TUI↔TUI checked
-  both ways after restarts). The run with iOS is not done yet.
-
-## Checkouts and who owns them
-
-This crate takes its dependencies by path, so the siblings must sit next to it:
-`~/Code/construct-client` (the client layer and the screens), `~/Code/construct-core` and
-`~/Code/construct-protos`. All use one toolchain, set in `rust-toolchain.toml`.
-
-- Other agent sessions work in the `construct-core` and `construct-protos` working copies. Never
-  switch their branches. Make changes there in a worktree, on a branch, through a PR. The owner
-  merges PRs in `construct-core`.
-- `construct-client` (repository) is where the client layer and the screens change, on their own
-  branch and PR, never as a copy in this repository. `construct-tui` is only the terminal shell.
-- To build this repository from a worktree, place symlinks to the siblings next to it, so that
-  `../../construct-client` resolves.
-- Turn the hooks on once per clone with `git config core.hooksPath .githooks`. The commit-msg hook
-  strips `Co-authored-by` lines; that is intended.
-
-## Working rules beyond this file
-
-- **Testing against the server.** Before release, the test and production server are the same
-  machine (owner, 2026-10-23). Registering test accounts and sending messages there for interop
-  checks is allowed. Keep them recognisably test accounts.
-- **This repository is public.** Never write server host names, IP addresses or other people's
-  personal data here, in commit messages, or in PR descriptions. Keep the wording neutral.
-- On the delivery or crypto path, every commit answers the three questions in
-  `construct-messenger/AGENTS.md`:
-  1. What does the server learn?
-  2. What can a party withhold or substitute?
-  3. Which trust boundary moves?
-- Protocol decisions are the core's (see "No protocol here" below). Before writing one in Rust
-  here or in `construct-client`, look in `construct-core/src/construct_core.udl` and the crate API
-  for it.
-
-## What this is
-
-A Tauri 2 window with an HTML/CSS interface modelled on the macOS `Construct Desktop` target:
-sidebar of chats, conversation, composer, the `Color.CT` palette. The program itself — account,
-keys, sessions, stream, storage — is `construct-client` (construct-client repository), running in
-Rust. The webview draws typed view events and sends back what the person did.
+## The Zen of Konstruct
 
 ```
-src-tauri/src/main.rs    Tauri commands: attach, and one per intent (send_message, open_chat, …)
-src-tauri/src/bridge.rs  construct-client ⇄ webview: ClientEvent → ViewEvent, intent → ClientCommand;
-                         the model a reloaded page is redrawn from; QR codes rendered as SVG
-ui/                      index.html, main.js, style.css (no framework, no bundler); JetBrains Mono
+Someone has solved it before. Read them first.
+The core decides; the app executes.
+A message names the state it means. Time is not an address.
+Reproduce, then fix.
+One meaning, one carrier.
+Bytes stay bytes.
+Measure, then build.
+The effect is the proof, not the exit code.
+A test that cannot fail is worse than no test.
+Boring before new.
+Temporary is permanent, unless something checks it.
+What nothing reads is not sent.
+Silence is the worst failure: a message that never appears raises no error.
 ```
 
-Until 2026-10-02 this repository held a different program: a Tauri app with an HTML interface
-and its own `engine.rs`, which re-decided what the core decides and stopped building when the
-core dropped its `desktop` feature. It was deleted, not migrated. From 2026-10-02 to 2026-10-23
-the window drew the TUI's screens as a character grid; the owner replaced that with this interface.
+Canonical source: `~/Code/construct-docs/decisions/rules-from-the-first-year.md` — change it there first.
 
-## Invariants
+## Rules
 
-- **The webview sees what is on screen, never the client's secrets.** `ViewEvent` carries names,
-  message text, ids, QR images. No key, token, certificate, session or protocol state crosses the
-  IPC boundary, and every intent from the webview is something the client checks. One exception:
-  the recovery phrase, sent only when the person asks to see it to make its copy, dropped from the
-  page when its dialog closes; the copy is checked in `construct-client`, not in JavaScript.
-- **Nothing from the network becomes markup.** Names and message text go into the page with
-  `textContent`. `innerHTML` is used only with the page's own literals (two SVG icons).
-- **No protocol in JavaScript.** `ui/main.js` draws and forwards intents; anything the core or
-  `construct-client` decides is asked of them. The previous `engine.rs` is what this rule is about.
-- **No framework, no bundler, no third-party JS.** The interface stays small enough to read whole,
-  and the CSP stays simple.
-- **Shortcuts go by the physical key** (`KeyboardEvent.code`). On a Cyrillic layout the browser
-  reports Ctrl+K as Ctrl+л. Russian is the main audience's layout.
-- **The CSP stays strict** (`tauri.conf.json`): only local scripts, no remote origins, images and
-  sounds only local or `data:`, and no plugin permissions beyond `core:default`.
-- **An attachment is shown only as what its bytes are.** The client fetches and opens it; Rust
-  puts it in the page as a `data:` URI only when its first bytes are a picture or a sound
-  (`bridge.rs` `sniff`), never by the type the sender declared. Anything else is saved to the
-  downloads folder, never over a file there, and nothing from the network is opened by the system:
-  a saved file's notice opens the folder.
+1. **Prior art first.** Before any protocol mechanism, write down how Signal / MLS / Matrix solve it and why we deviate. The reference client is iOS.
+2. **The core decides, this app executes.** Nothing two clients must compute identically, no session or ratchet decision, no lifecycle phase lives here or in JavaScript. Before writing one in Rust here or in `construct-client`, look in `construct-core/src/construct_core.udl`. The old `engine.rs` re-decided what the core decides; it was deleted.
+3. **A control message names the state it refers to.** A timer, cooldown, window or retry budget in a fix means the message has no address.
+4. **Reproduce before fixing**, on a stand that fails deterministically; a fix counts when it turns green.
+5. **One meaning, one carrier.** Read `decisions/one-meaning-two-carriers.md` before adding a field, counter or timeout; the ids that cross IPC are the client's, not re-derived in JS.
+6. **Binary stays binary**; text encodings only where a text boundary demands them (`data:` URIs for the page, QR).
+7. **Measure, then build.**
+8. **Verify the effect, not the exit code.**
+9. **A test must be able to fail**; mutation-check new tests.
+10. **Depth before breadth.** Linux first (stage by stage in the plan); Windows is a later stage.
+11. **A temporary exception has an end date and a check.**
+12. **Branch and PR, always** (see Git).
 
-## Build & run
+A change on the delivery or crypto path answers three questions in its commit message: what does the server learn that it did not before; what can a party withhold or substitute that it could not before; which trust boundary moves, and which way.
+
+## Invariants of this repo
+
+- **The webview sees what is on screen, never the client's secrets.** `ViewEvent` carries names, text, ids, QR images; no key, token, certificate, session or protocol state crosses IPC, and every intent is something the client checks. One exception: the recovery phrase, sent only when asked, dropped when its dialog closes; the copy is checked in `construct-client`.
+- **Nothing from the network becomes markup.** `textContent` for names and text; `innerHTML` only for the page's own literals.
+- **No protocol in JavaScript.** `ui/main.js` draws and forwards intents.
+- **No framework, no bundler, no third-party JS** — small enough to read whole, simple CSP.
+- **The CSP stays strict** (`tauri.conf.json`): local scripts only, no remote origins, images and sounds local or `data:`, no plugin permissions beyond `core:default`.
+- **An attachment is shown as what its bytes are**, not what the sender declared: Rust makes a `data:` URI only when the first bytes are a picture or a sound (`bridge.rs` `sniff`). Anything else is saved to downloads, never over an existing file, and nothing from the network is opened by the system.
+- **Shortcuts go by the physical key** (`KeyboardEvent.code`): Ctrl+K arrives as Ctrl+л on a Cyrillic layout.
+- **This repository is public.** No server host names, IPs or other people's personal data in files, commits or PRs.
+- **Testing against the server:** before release test and production are one machine; recognisable test accounts and test messages for interop are allowed (owner, 2026-10-23).
+
+Layout: `src-tauri/src/main.rs` (Tauri commands, one per intent), `src-tauri/src/bridge.rs` (`ClientEvent` → `ViewEvent`, intent → `ClientCommand`, the model a reloaded page is redrawn from, QR as SVG), `ui/` (index.html, main.js, style.css; JetBrains Mono).
+
+### Checkouts
+
+Dependencies are by path; these must sit next to this repo: `~/Code/construct-client` (client layer and screens — they change there, on their own branch and PR, never as a copy here), `~/Code/construct-core`, `~/Code/construct-protos`. One toolchain, `rust-toolchain.toml`. Other sessions work in the core and protos working copies: never switch their branches; change them in a worktree, on a branch, through a PR (the owner merges core PRs). To build from a worktree, symlink the siblings so `../../construct-client` resolves. Once per clone: `git config core.hooksPath .githooks` (the commit-msg hook strips `Co-authored-by` lines; intended; pre-push runs fmt and clippy `-D warnings`).
+
+### Build
 
 ```bash
-cargo run -p construct-desktop          # the window, without bundling
+cargo run -p construct-desktop   # the window, without bundling (works on macOS too)
 cargo test --workspace
-npx @tauri-apps/cli@2 build             # deb/rpm/AppImage on Linux, nsis/msi on Windows
+npx @tauri-apps/cli@2 build      # deb/rpm/AppImage on Linux, nsis/msi on Windows
 ```
 
-`construct-client`, `construct-core` and `construct-protos` must be checked out next to this
-repository; the client and screens crates are path dependencies. The pre-push hook runs fmt and clippy (`-D warnings`).
+Installers come only from the target system. The `linux` workflow builds the Linux ones on every change; a tag `vX.Y.Z` on main publishes a GitHub release via `release.yml` (README, "Releasing").
 
-`cargo run` works on macOS too, which is enough for development. The installers come only from
-the target system: deb, rpm and AppImage from Linux, nsis and msi from Windows. The `linux`
-workflow builds the Linux ones on every change; a tag `vX.Y.Z` on main publishes them as a GitHub
-release through `release.yml` (README, "Releasing"). Windows is stage 5 of the plan.
+## Git and process
 
-## Documentation & session notes
-
-Docs live in `~/Code/construct-docs`, an Obsidian vault with flat domain folders. **The vault's
-`AGENTS.md` is authoritative** for structure and writing rules.
-
-After any session with architectural changes, design decisions, root-cause analysis or
-non-obvious choices:
-
-1. Write `sessions/YYYY-MM-DD-<topic>.md` (Context / What Changed / **Why** / Decisions / Open
-   Questions). `## Why` with rejected alternatives is mandatory.
-2. If it constrains future work, add or update `decisions/<slug>.md`.
-3. Patch the affected spec in the **same** session.
-4. Append one line to `~/Code/construct-docs/log.md`: `[YYYY-MM-DD HH:MM] note | <topic>`.
-
-## Git workflow (branch + PR only)
-
-**Never commit on `main`.** Every change goes on a topic branch cut from an up-to-date `main`
-(`feat|fix|docs|chore|test/<topic>`) and lands through a GitHub pull request. Agents push and
-open the PR only when asked.
-
-`main` is what a release is built from, so it moves only by a reviewed merge. From 2026-09-11 to
-2026-10-01 changes went straight to `main` across the construct-* repos — two people on the
-project made a branch per change look like ceremony. That was reversed on purpose: the habit has
-to be in place before there is a release for it to break.
-
-A commit that landed on `main` by mistake and is not pushed moves off it with
-`git branch <topic> && git reset --keep origin/main && git switch <topic>`. Pushed history is
-never rewritten.
+- **Never commit on `main`.** Topic branch (`feat|fix|docs|chore|test/<topic>`) from an up-to-date `main`, PR into `main`. Conventional Commits. Agents push and open the PR only when asked.
+- Check branch and `git status` before every commit; never `checkout -- .`, `reset --hard` or `stash` in a shared tree; never rewrite pushed history. A commit made on `main` by mistake and not pushed: `git branch <topic> && git reset --keep origin/main && git switch <topic>`.
+- Docs live in `~/Code/construct-docs` (its `AGENTS.md` is authoritative). After work: a line in the plan's «Ход»; a root cause or rejected alternatives to `sessions/` (with `## Why`); a constraint to `decisions/`; one line to `log.md`.
