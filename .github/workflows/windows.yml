@@ -51,6 +51,13 @@ jobs:
           repository: konstruct-msg/construct-protos
           path: construct-protos
 
+      # SQLCipher has no system crypto here, so OpenSSL is built from source (construct-store
+      # `vendored-openssl`). Its build wants a Windows perl — Git's, first on bash's PATH, is
+      # refused — and NASM for its assembly.
+      - uses: ilammy/setup-nasm@v1
+      - name: OpenSSL build perl
+        run: echo "OPENSSL_SRC_PERL=C:/Strawberry/perl/bin/perl.exe" >> "$GITHUB_ENV"
+
       - uses: arduino/setup-protoc@v3
         with:
           version: "28.x"
