@@ -245,6 +245,46 @@ fn share_profile(peer_id: String, on: bool, intents: State<Intents>) {
 }
 
 #[tauri::command]
+fn load_stickers(intents: State<Intents>) {
+    intents.send(Intent::LoadStickers);
+}
+
+#[tauri::command]
+fn load_sticker(pack_id: String, index: u32, emoji: String, intents: State<Intents>) {
+    intents.send(Intent::LoadSticker(
+        construct_client::stickers::StickerRef {
+            pack_id,
+            index,
+            emoji,
+        },
+    ));
+}
+
+#[tauri::command]
+fn send_sticker(peer_id: String, pack_id: String, index: u32, intents: State<Intents>) {
+    intents.send(Intent::SendSticker {
+        peer_id,
+        pack_id,
+        index,
+    });
+}
+
+#[tauri::command]
+fn load_sticker_catalog(intents: State<Intents>) {
+    intents.send(Intent::LoadStickerCatalog);
+}
+
+#[tauri::command]
+fn add_sticker_pack(pack_id: String, intents: State<Intents>) {
+    intents.send(Intent::AddStickerPack(pack_id));
+}
+
+#[tauri::command]
+fn remove_sticker_pack(pack_id: String, intents: State<Intents>) {
+    intents.send(Intent::RemoveStickerPack(pack_id));
+}
+
+#[tauri::command]
 fn load_media(message_id: String, index: usize, intents: State<Intents>) {
     intents.send(Intent::LoadMedia { message_id, index });
 }
@@ -586,6 +626,12 @@ fn main() {
             set_alias,
             rename_device,
             load_media,
+            load_stickers,
+            load_sticker,
+            send_sticker,
+            load_sticker_catalog,
+            add_sticker_pack,
+            remove_sticker_pack,
             save_media,
             open_downloads,
             find_contact,

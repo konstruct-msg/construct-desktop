@@ -118,7 +118,11 @@ const WORDS = {
     attachment_other: "Attachment", attachmentHint: "Not shown here yet — open it on your phone.",
     save: "Save", saved: "Saved to Downloads: {name}. Click to show the folder.",
     loading: "Loading…", mediaFailed: "Did not load: {reason}", retry: "Try again",
-    play: "Play", close: "Close", attach: "Attach a file", sending: "Sending {name}…",
+    play: "Play", close: "Close", attach: "Attach", sending: "Sending {name}…",
+    stickers: "Stickers", photoOrVideo: "Photo…", fileEllipsis: "File…",
+    recentStickers: "Recent", morePacks: "More packs", addPack: "Add", removePack: "Remove", confirmRemovePack: "Remove?",
+    packInfo: "{publisher} · {count} stickers · {size}", catalogFailed: "The catalog did not load",
+    noStickers: "No stickers yet", sticker: "Sticker {emoji}",
     tooLarge: "{name} is larger than 95 MB and cannot be sent",
     profile: "Profile", devices: "Devices", chatsAndLook: "Chats and look",
     notificationsAndPrivacy: "Notifications and privacy", usernamePlaceholder: "username",
@@ -262,7 +266,11 @@ const WORDS = {
     attachment_other: "Вложение", attachmentHint: "Здесь пока не показывается — откройте на телефоне.",
     save: "Сохранить", saved: "Сохранено в «Загрузки»: {name}. Нажмите, чтобы открыть папку.",
     loading: "Загрузка…", mediaFailed: "Не загрузилось: {reason}", retry: "Повторить",
-    play: "Воспроизвести", close: "Закрыть", attach: "Прикрепить файл", sending: "Отправляется {name}…",
+    play: "Воспроизвести", close: "Закрыть", attach: "Прикрепить", sending: "Отправляется {name}…",
+    stickers: "Стикеры", photoOrVideo: "Фото…", fileEllipsis: "Файл…",
+    recentStickers: "Недавние", morePacks: "Ещё наборы", addPack: "Добавить", removePack: "Убрать", confirmRemovePack: "Убрать?",
+    packInfo: "{publisher} · стикеров: {count} · {size}", catalogFailed: "Каталог не загрузился",
+    noStickers: "Стикеров пока нет", sticker: "Стикер {emoji}",
     tooLarge: "{name} больше 95 МБ — такой файл не отправить",
     profile: "Профиль", devices: "Устройства", chatsAndLook: "Чаты и вид",
     notificationsAndPrivacy: "Уведомления и приватность", usernamePlaceholder: "имя пользователя",
@@ -529,6 +537,7 @@ function chatName(peerId) {
 function openChat(peerId) {
   if (state.open !== peerId && state.compose) cancelCompose();
   closeMessageMenu();
+  closePicker();
   state.open = peerId;
   $("empty").hidden = true;
   $("chat").hidden = false;
@@ -579,7 +588,8 @@ function messageNode(m, previous) {
   const wrap = el("div", `msg ${m.sent ? "out" : "in"}`);
   if (previous && (previous.sent !== m.sent || m.time - previous.time > 5 * 60000)) wrap.classList.add("gap");
   wrap.dataset.id = m.id;
-  const bubble = el("div", "bubble");
+  const bubble = el("div", m.sticker ? "bubble sticker" : "bubble");
+  if (m.sticker) bubble.append(stickerArt(m.sticker));
   if (m.quote) {
     const quote = el("button", "quote");
     quote.type = "button";
@@ -588,12 +598,12 @@ function messageNode(m, previous) {
     bubble.append(quote);
   }
   m.media.forEach((item, index) => bubble.append(mediaNode(m, item, index)));
-  if (m.attachment && m.media.length === 0) {
+  if (m.attachment && m.media.length === 0 && !m.sticker) {
     const chip = el("div", "attachment");
     chip.append(el("span", "kind", `📎 ${t(`attachment_${m.attachment}`)}`), el("span", "hint", t("attachmentHint")));
     bubble.append(chip);
   }
-  if (m.text) bubble.append(el("span", "text", m.text));
+  if (m.text && !m.sticker) bubble.append(el("span", "text", m.text));
   wrap.append(bubble);
   if (m.reactions.length > 0) {
     const row = el("div", "reactions");
@@ -803,7 +813,7 @@ function openMessageMenu(m, at) {
   };
   const items = [item("reply", () => { closeMessageMenu(); startCompose("reply", m); })];
   if (m.sent && !m.attachment) items.push(item("edit", () => { closeMessageMenu(); startCompose("edit", m); }));
-  if (m.text) {
+  if (m.text && !m.sticker) {
     items.push(item("copy", async () => {
       closeMessageMenu();
       await navigator.clipboard.writeText(m.text);
@@ -942,12 +952,179 @@ async function sendFile(file) {
     },
   }).catch((e) => toast(String(e), true));
 }
-$("attach").addEventListener("click", () => $("attach-file").click());
-$("attach-file").addEventListener("change", (ev) => {
-  const [file] = ev.target.files;
-  ev.target.value = "";
-  if (file) sendFile(file);
+for (const input of [$("attach-file"), $("attach-photo")]) {
+  input.addEventListener("change", (ev) => {
+    const [file] = ev.target.files;
+    ev.target.value = "";
+    if (file) sendFile(file);
+  });
+}
+
+// ── Stickers ────────────────────────────────────────────────────────────────
+// A message names a sticker; its picture comes from the pack, which the client holds, checks
+// and fetches. The page only asks for pictures and shows the emoji until one comes.
+
+const stickerImages = new Map(); // "packId:index" → data URI | null (none to be had) | undefined (asked)
+const stickerKey = (s) => `${s.packId}:${s.index}`;
+const picker = { packs: [], recent: [], catalog: null, catalogError: null };
+
+function stickerArt(s) {
+  const art = el("span", "sticker-art");
+  art.dataset.sticker = stickerKey(s);
+  art.setAttribute("aria-label", t("sticker", { emoji: s.emoji }));
+  drawSticker(art, s);
+  return art;
+}
+
+function drawSticker(art, s) {
+  const key = stickerKey(s);
+  const url = stickerImages.get(key);
+  if (url) {
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = s.emoji;
+    img.draggable = false;
+    art.replaceChildren(img);
+    return;
+  }
+  art.replaceChildren(el("span", "emoji", s.emoji));
+  if (!stickerImages.has(key)) {
+    stickerImages.set(key, undefined);
+    invoke("load_sticker", { packId: s.packId, index: s.index, emoji: s.emoji }).catch(() => {});
+  }
+}
+
+function onStickerImage(e) {
+  const key = stickerKey(e);
+  stickerImages.set(key, e.url ?? null);
+  if (!e.url) return;
+  for (const art of document.querySelectorAll(".sticker-art")) {
+    if (art.dataset.sticker !== key) continue;
+    const img = document.createElement("img");
+    img.src = e.url;
+    img.alt = art.querySelector(".emoji")?.textContent ?? "";
+    img.draggable = false;
+    art.replaceChildren(img);
+  }
+}
+
+function openPicker() {
+  const panel = $("picker");
+  const at = $("attach").getBoundingClientRect();
+  panel.style.left = `${Math.max(16, at.left)}px`;
+  panel.style.bottom = `${window.innerHeight - at.top + 8}px`;
+  panel.hidden = false;
+  $("attach").setAttribute("aria-expanded", "true");
+  renderPicker();
+  invoke("load_stickers").catch(() => {});
+  if (!picker.catalog) invoke("load_sticker_catalog").catch(() => {});
+}
+
+function closePicker() {
+  $("picker").hidden = true;
+  $("attach").setAttribute("aria-expanded", "false");
+}
+
+function stickerButton(s) {
+  const b = el("button");
+  b.type = "button";
+  b.title = s.emoji;
+  b.append(stickerArt(s));
+  b.addEventListener("click", () => {
+    if (!state.open) return;
+    closePicker();
+    invoke("send_sticker", { peerId: state.open, packId: s.packId, index: s.index })
+      .catch((e) => toast(String(e), true));
+  });
+  return b;
+}
+
+function stickerSection(title, stickers, action = null) {
+  const head = el("h4", "", title);
+  if (action) head.append(action);
+  const grid = el("div", "sticker-grid");
+  grid.append(...stickers.map(stickerButton));
+  return [head, grid];
+}
+
+function renderPicker() {
+  const body = $("picker-stickers");
+  const nodes = [];
+  if (picker.recent.length > 0) nodes.push(...stickerSection(t("recentStickers"), picker.recent));
+  for (const pack of picker.packs) {
+    const remove = el("button", "link", t("removePack"));
+    remove.type = "button";
+    remove.addEventListener("click", (ev) =>
+      confirmTwice(ev.currentTarget, "confirmRemovePack", () => invoke("remove_sticker_pack", { packId: pack.packId })));
+    nodes.push(...stickerSection(pack.title, pack.stickers, remove));
+  }
+  if (nodes.length === 0) nodes.push(el("p", "dim small empty-note", t("noStickers")));
+  const offered = picker.catalog ?? [];
+  if (offered.length > 0 || picker.catalogError) nodes.push(el("h4", "", t("morePacks")));
+  for (const pack of offered) {
+    const row = el("div", "catalog-row");
+    const what = el("div", "what");
+    what.append(
+      el("span", "", pack.title),
+      el("span", "small dim", t("packInfo", { publisher: pack.publisher, count: pack.count, size: bytes(pack.bytes) })),
+    );
+    const add = el("button", "secondary", t("addPack"));
+    add.type = "button";
+    add.addEventListener("click", () => {
+      add.disabled = true;
+      add.textContent = t("loading");
+      invoke("add_sticker_pack", { packId: pack.packId }).catch((e) => toast(String(e), true));
+    });
+    row.append(what, add);
+    nodes.push(row);
+  }
+  if (picker.catalogError) {
+    const retry = el("button", "link", t("retry"));
+    retry.type = "button";
+    retry.addEventListener("click", () => {
+      picker.catalogError = null;
+      renderPicker();
+      invoke("load_sticker_catalog").catch(() => {});
+    });
+    const row = el("p", "small dim", `${t("catalogFailed")} `);
+    row.append(retry);
+    nodes.push(row);
+  }
+  body.replaceChildren(...nodes);
+}
+
+function onStickers(e) {
+  picker.packs = e.packs;
+  picker.recent = e.recent;
+  // A pack just added leaves the catalog.
+  if (picker.catalog) picker.catalog = picker.catalog.filter((c) => !e.packs.some((p) => p.packId === c.packId));
+  if (!$("picker").hidden) renderPicker();
+}
+
+function onStickerCatalog(e) {
+  picker.catalog = e.error ? null : e.packs;
+  picker.catalogError = e.error ?? null;
+  if (!$("picker").hidden) renderPicker();
+}
+
+$("attach").addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  if ($("picker").hidden) openPicker();
+  else closePicker();
 });
+$("picker-photo").addEventListener("click", () => { closePicker(); $("attach-photo").click(); });
+$("picker-file").addEventListener("click", () => { closePicker(); $("attach-file").click(); });
+document.addEventListener("click", (ev) => {
+  if (!$("picker").hidden && !ev.target.closest("#picker") && !ev.target.closest("#attach")) closePicker();
+});
+$("picker").addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") {
+    ev.stopPropagation();
+    closePicker();
+    $("attach").focus();
+  }
+});
+window.addEventListener("resize", closePicker);
 
 draft.addEventListener("input", fitDraft);
 draft.addEventListener("keydown", (ev) => {
@@ -1866,6 +2043,9 @@ function onEvent(e) {
     case "messageDeleted": removeMessage(e.peerId, e.messageId); break;
     case "delivered": markDelivered(e.messageId); break;
     case "media": onMedia(e); break;
+    case "stickers": onStickers(e); break;
+    case "stickerImage": onStickerImage(e); break;
+    case "stickerCatalog": onStickerCatalog(e); break;
     case "mediaSaved": onMediaSaved(e); break;
     case "connection": {
       const dot = $("connection");

@@ -129,8 +129,11 @@
           </button>
         </div>
         <form id="composer" class="composer">
-          <button type="button" class="attach icon" id="attach" data-tl="attach">📎</button>
+          <button type="button" class="attach icon" id="attach" data-tl="attach" aria-haspopup="dialog" aria-expanded="false">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="M12 7.5v9M7.5 12h9"/></svg>
+          </button>
           <input type="file" id="attach-file" hidden>
+          <input type="file" id="attach-photo" accept="image/*,video/*" hidden>
           <textarea id="draft" rows="1" data-tp="messagePlaceholder"></textarea>
           <button type="submit" class="send" id="send" data-tl="send" disabled>
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16V8M8.5 11.5 12 8l3.5 3.5"/></svg>
@@ -141,6 +144,16 @@
   </section>
 
   <div id="msg-menu" class="msg-menu" role="menu" hidden></div>
+
+  <!-- What "+" opens, as on iOS: stickers, or a photo or a file from this computer -->
+  <div id="picker" class="picker" role="dialog" data-tl="attach" hidden>
+    <div id="picker-stickers" class="picker-body"></div>
+    <nav class="picker-tabs">
+      <button type="button" class="tab" aria-selected="true" data-t="stickers"></button>
+      <button type="button" class="tab" id="picker-photo" data-t="photoOrVideo"></button>
+      <button type="button" class="tab" id="picker-file" data-t="fileEllipsis"></button>
+    </nav>
+  </div>
 
   <!-- Add contact -->
   <dialog id="dlg-add" class="sheet">
