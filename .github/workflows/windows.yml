@@ -1,0 +1,126 @@
+# Builds Konstruct for Windows: tests, clippy, and the NSIS (.exe) and MSI installers.
+#
+# As in `linux.yml`: construct-client, construct-core and construct-protos are checked out beside
+# this repository and built at their main, without `--locked` (see the top of that file).
+#
+# The installers are not signed yet (TODO 218, stage 5: the code-signing certificate), so
+# SmartScreen warns when one is run.
+name: windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      client-ref:
+        description: "construct-client branch or commit to build against"
+        default: main
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: construct-desktop
+      - uses: actions/checkout@v4
+        with:
+          repository: konstruct-msg/construct-client
+          ref: ${{ inputs.client-ref || 'main' }}
+          path: construct-client
+      - uses: actions/checkout@v4
+        with:
+          repository: konstruct-msg/construct-core
+          path: construct-core
+      - uses: actions/checkout@v4
+        with:
+          repository: konstruct-msg/construct-protos
+          path: construct-protos
+
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: "28.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rust toolchain
+        working-directory: construct-desktop
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            construct-desktop/target
+          key: windows-cargo-${{ hashFiles('construct-desktop/Cargo.lock', 'construct-desktop/rust-toolchain.toml') }}
+          restore-keys: windows-cargo-
+
+      - name: Clippy
+        working-directory: construct-desktop
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Tests
+        working-directory: construct-desktop
+        run: cargo test --workspace
+
+      # As on Linux: the cached target/ holds the previous run's installers.
+      - name: Installers
+        working-directory: construct-desktop
+        run: |
+          rm -rf target/release/bundle
+          npx --yes @tauri-apps/cli@2 build --bundles nsis,msi
+
+      # The store key in Credential Manager: the client's keyring round trip, against the
+      # runner's real one. Ignored in ordinary runs because it writes to the key store.
+      - name: Credential Manager
+        working-directory: construct-client
+        run: cargo test -p construct-client --lib -- --ignored the_os_key_store
+
+      # The built program starts and keeps running: a missing DLL, a panic at startup or a
+      # WebView2 that cannot come up ends it before the timeout. It finds no account on a fresh
+      # runner, so it waits on the first screen.
+      - name: Smoke test
+        working-directory: construct-desktop
+        run: |
+          export RUST_LOG=info
+          ./target/release/konstruct-desktop.exe > smoke.log 2>&1 &
+          pid=$!
+          sleep 20
+          alive=0
+          kill -0 "$pid" 2>/dev/null && alive=1
+          kill "$pid" 2>/dev/null || true
+          taskkill //F //IM konstruct-desktop.exe > /dev/null 2>&1 || true
+          tail -n 30 smoke.log
+          if grep -qi panicked smoke.log; then exit 1; fi
+          [ "$alive" = 1 ] || { echo "konstruct-desktop.exe exited before the timeout"; exit 1; }
+
+      - name: Sibling commits
+        run: |
+          for r in construct-desktop construct-client construct-core construct-protos; do
+            echo "$r $(git -C $r rev-parse HEAD)"
+          done | tee construct-desktop/target/release/bundle/siblings.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: konstruct-windows
+          path: |
+            construct-desktop/target/release/bundle/siblings.txt
+            construct-desktop/target/release/bundle/nsis/*.exe
+            construct-desktop/target/release/bundle/msi/*.msi
+          if-no-files-found: error
