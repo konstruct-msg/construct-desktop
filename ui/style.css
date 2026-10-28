@@ -267,7 +267,40 @@ img.avatar { object-fit: cover; background: var(--noise); }
   font: 15px/1.3 var(--sans); user-select: text; overflow-y: hidden;
 }
 .composer textarea:focus { outline: none; border-color: var(--accent); }
-.attach { width: 42px; height: 42px; flex: none; font-size: 20px; }
+.attach { width: 42px; height: 42px; flex: none; display: flex; align-items: center;
+          justify-content: center; }
+.attach svg { width: 26px; height: 26px; }
+.attach[aria-expanded="true"] { color: var(--accent); }
+
+/* The "+" panel: stickers, and the way to a photo or a file. */
+.picker { position: fixed; z-index: 10; width: 360px; max-width: calc(100vw - 32px);
+          height: min(440px, calc(100vh - 120px)); display: flex; flex-direction: column;
+          border-radius: 12px; background: var(--bg); border: 1px solid var(--noise);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
+.picker-body { flex: 1; overflow-x: hidden; overflow-y: auto; padding: 8px 10px 12px; }
+.picker-tabs { display: flex; gap: 4px; padding: 8px; border-top: 1px solid var(--noise); }
+.picker-tabs .tab { font-size: 12px; white-space: nowrap; }
+.picker h4 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+             margin: 10px 2px 6px; font: 600 11px var(--sans); text-transform: uppercase;
+             letter-spacing: .06em; color: var(--dim); }
+.picker h4 .link { font: 11px var(--sans); text-transform: none; letter-spacing: 0; color: var(--dim); }
+.picker h4 .link:hover { color: var(--danger); }
+.sticker-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.sticker-grid button { aspect-ratio: 1; min-width: 0; border: none; border-radius: 8px; background: none;
+                       padding: 4px; display: flex; align-items: center; justify-content: center; }
+.sticker-grid button:hover, .sticker-grid button:focus-visible { background: var(--noise); outline: none; }
+.sticker-art { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.sticker-art img { width: 100%; height: 100%; min-width: 0; object-fit: contain; }
+.sticker-art .emoji { font-size: 34px; line-height: 1; }
+.catalog-row { display: flex; align-items: center; gap: 10px; padding: 6px 2px; }
+.catalog-row .what { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.catalog-row .what .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker .empty-note { text-align: center; padding: 24px 8px; }
+
+/* A sticker in the transcript: the picture alone, no bubble. */
+.msg .bubble.sticker { background: none; border: none; padding: 0; }
+.msg .bubble.sticker .sticker-art { width: 160px; height: 160px; }
+.msg .bubble.sticker .emoji { font-size: 96px; }
 .send { width: 42px; height: 42px; flex: none; border: none; background: none; padding: 0;
         color: var(--accent); }
 .send svg { width: 34px; height: 34px; }

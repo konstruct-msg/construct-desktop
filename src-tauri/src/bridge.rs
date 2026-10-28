@@ -15,6 +15,7 @@ use construct_client::{
     local_store::{Attachment, MediaInfo, StoredMessage},
     media::OpenedMedia,
     recovery::RecoveryState,
+    stickers::StickerRef,
 };
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -79,6 +80,22 @@ pub enum ViewEvent {
         message_id: String,
         index: usize,
         url: Option<String>,
+        error: Option<String>,
+    },
+    /// The sticker picker: the packs it offers and the stickers sent lately, newest first.
+    Stickers {
+        packs: Vec<StickerPackRow>,
+        recent: Vec<StickerRow>,
+    },
+    /// A sticker's picture as a `data:` URI; `None` when it cannot be had, and its emoji stays.
+    StickerImage {
+        pack_id: String,
+        index: u32,
+        url: Option<String>,
+    },
+    /// The packs the server offers that the picker does not; or why they could not be read.
+    StickerCatalog {
+        packs: Vec<CatalogRow>,
         error: Option<String>,
     },
     /// File `index` of a message was saved in the downloads folder under `name`.
@@ -277,6 +294,48 @@ pub struct MessageRow {
     pub reactions: Vec<ReactionRow>,
     /// The files it carries, fetched one by one by index.
     pub media: Vec<MediaRow>,
+    /// The sticker it is: drawn from its pack ([`Intent::LoadSticker`]), its emoji until then.
+    pub sticker: Option<StickerRow>,
+}
+
+/// A sticker: its pack, its place there, and the emoji that stands for it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StickerRow {
+    pub pack_id: String,
+    pub index: u32,
+    pub emoji: String,
+}
+
+impl From<StickerRef> for StickerRow {
+    fn from(r: StickerRef) -> Self {
+        Self {
+            pack_id: r.pack_id,
+            index: r.index,
+            emoji: r.emoji,
+        }
+    }
+}
+
+/// A pack in the sticker picker.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StickerPackRow {
+    pub pack_id: String,
+    pub title: String,
+    pub publisher: String,
+    pub stickers: Vec<StickerRow>,
+}
+
+/// A pack the server offers.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogRow {
+    pub pack_id: String,
+    pub title: String,
+    pub publisher: String,
+    pub count: u32,
+    pub bytes: u64,
 }
 
 /// A device of our account in the settings screen.
@@ -391,6 +450,19 @@ pub enum Intent {
         alias: Option<String>,
     },
     RenameDevice(String),
+    /// The sticker picker.
+    LoadStickers,
+    /// A sticker's picture.
+    LoadSticker(StickerRef),
+    /// Send sticker `index` of pack `pack_id` to `peer_id`.
+    SendSticker {
+        peer_id: String,
+        pack_id: String,
+        index: u32,
+    },
+    LoadStickerCatalog,
+    AddStickerPack(String),
+    RemoveStickerPack(String),
     /// Show file `index` of a message.
     LoadMedia {
         message_id: String,
@@ -940,6 +1012,20 @@ fn handle_intent(
             alias,
         }),
         Intent::RenameDevice(name) => client.send(ClientCommand::RenameDevice(name)),
+        Intent::LoadStickers => client.send(ClientCommand::LoadStickers),
+        Intent::LoadSticker(sticker) => client.send(ClientCommand::LoadSticker(sticker)),
+        Intent::SendSticker {
+            peer_id,
+            pack_id,
+            index,
+        } => client.send(ClientCommand::SendSticker {
+            contact_id: peer_id,
+            pack_id,
+            index,
+        }),
+        Intent::LoadStickerCatalog => client.send(ClientCommand::LoadStickerCatalog),
+        Intent::AddStickerPack(pack) => client.send(ClientCommand::AddStickerPack(pack)),
+        Intent::RemoveStickerPack(pack) => client.send(ClientCommand::RemoveStickerPack(pack)),
         Intent::LoadMedia { message_id, index } => {
             client.send(ClientCommand::LoadMedia { message_id, index })
         }
@@ -1154,6 +1240,7 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
                 attachment: None,
                 reactions: Vec::new(),
                 media: Vec::new(),
+                sticker: None,
             };
             let chat = model.chat_mut(&contact_id);
             chat.preview = preview(&row);
@@ -1356,6 +1443,42 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             }
             out
         }
+        ClientEvent::Stickers { packs, recent } => vec![ViewEvent::Stickers {
+            packs: packs
+                .into_iter()
+                .map(|p| StickerPackRow {
+                    pack_id: p.pack_id,
+                    title: p.title,
+                    publisher: p.publisher,
+                    stickers: p.stickers.into_iter().map(Into::into).collect(),
+                })
+                .collect(),
+            recent: recent.into_iter().map(Into::into).collect(),
+        }],
+        ClientEvent::StickerImage { sticker, image } => vec![ViewEvent::StickerImage {
+            url: image.as_deref().and_then(sticker_uri),
+            pack_id: sticker.pack_id,
+            index: sticker.index,
+        }],
+        ClientEvent::StickerCatalog(result) => vec![match result {
+            Ok(packs) => ViewEvent::StickerCatalog {
+                packs: packs
+                    .into_iter()
+                    .map(|p| CatalogRow {
+                        pack_id: p.pack_id,
+                        title: p.title,
+                        publisher: p.publisher,
+                        count: p.sticker_count,
+                        bytes: p.total_bytes,
+                    })
+                    .collect(),
+                error: None,
+            },
+            Err(error) => ViewEvent::StickerCatalog {
+                packs: Vec::new(),
+                error: Some(error),
+            },
+        }],
         ClientEvent::HistoryNearby(step) => {
             use construct_client::history::NearbyStep;
             // Another device started sending here: that is a transfer under way.
@@ -1519,6 +1642,7 @@ fn message_row(m: StoredMessage, me: &str) -> MessageRow {
         attachment: m.attachment.map(attachment_name),
         reactions,
         media: m.media.into_iter().map(media_row).collect(),
+        sticker: m.sticker.map(Into::into),
         id: m.id,
         text: m.text,
         time: m.timestamp_ms,
@@ -1576,6 +1700,16 @@ fn sniff(bytes: &[u8], declared_mime: &str) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// A sticker's picture, put in the page only as what its bytes are: a WebP (the client has
+/// checked it against its pack already).
+fn sticker_uri(bytes: &[u8]) -> Option<String> {
+    use base64::Engine;
+    (sniff(bytes, "") == Some("image/webp")).then(|| {
+        let body = base64::engine::general_purpose::STANDARD.encode(bytes);
+        format!("data:image/webp;base64,{body}")
+    })
 }
 
 fn data_uri(media: &OpenedMedia) -> Option<String> {
@@ -1690,6 +1824,10 @@ fn attachment_name(a: Attachment) -> &'static str {
 
 /// The chat list's line for a message. An attachment is marked, the window words it.
 fn preview(row: &MessageRow) -> String {
+    // A sticker is its emoji, not an attachment.
+    if let Some(sticker) = &row.sticker {
+        return sticker.emoji.clone();
+    }
     match row.attachment {
         Some(_) if row.text.is_empty() => "📎".into(),
         Some(_) => format!("📎 {}", row.text),
@@ -2096,6 +2234,7 @@ mod tests {
                 attachment: None,
                 reactions: Vec::new(),
                 media: Vec::new(),
+                sticker: None,
             },
         })
         .unwrap();
@@ -2233,6 +2372,38 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// A sticker's picture reaches the page only when its bytes are a WebP; otherwise the emoji
+    /// stays. In the chat list a sticker is its emoji, not an attachment.
+    #[test]
+    fn a_sticker_is_its_picture_or_its_emoji() {
+        let mut model = model();
+        let sticker = StickerRef {
+            pack_id: "ab".repeat(32),
+            index: 3,
+            emoji: "🐱".into(),
+        };
+        let image = |bytes: &[u8]| ClientEvent::StickerImage {
+            sticker: sticker.clone(),
+            image: Some(bytes.to_vec()),
+        };
+        let webp = b"RIFF\0\0\0\0WEBPVP8 ";
+        let out = on_client_event(image(webp), &mut model, "");
+        assert!(
+            matches!(&out[..], [ViewEvent::StickerImage { url: Some(url), index: 3, .. }]
+            if url.starts_with("data:image/webp;base64,"))
+        );
+        let out = on_client_event(image(b"<svg onload=alert(1)>"), &mut model, "");
+        assert!(matches!(
+            &out[..],
+            [ViewEvent::StickerImage { url: None, .. }]
+        ));
+
+        let mut message = row("🐱", false);
+        message.attachment = Some("sticker");
+        message.sticker = Some(sticker.into());
+        assert_eq!(preview(&message), "🐱");
+    }
+
     fn row(text: &str, sent: bool) -> MessageRow {
         MessageRow {
             id: "m".into(),
@@ -2245,6 +2416,7 @@ mod tests {
             attachment: None,
             reactions: Vec::new(),
             media: Vec::new(),
+            sticker: None,
         }
     }
 
