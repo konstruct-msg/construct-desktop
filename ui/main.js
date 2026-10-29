@@ -48,9 +48,9 @@ const WORDS = {
     quizWrong: "Those words don't match. Look at your copy again.", copyConfirmed: "Copy confirmed",
     enterHint: "The twelve words, in order, separated by spaces.", save: "Save", phraseAccepted: "Phrase accepted",
     about: "About", version: "Version", logs: "Logs", openLogs: "Open logs folder",
-    veil: "VEIL", veilOff: "Off", veilOn: "On",
-    veilHint: "VEIL reaches Konstruct through a front — an ordinary-looking HTTPS site — where Konstruct is blocked. On: nothing goes anywhere but through a front; with none answering, nothing is sent.",
-    veilStateOff: "Off: connected directly.", veilStateConnecting: "Connecting to a front…",
+    veil: "VEIL", veilOff: "Off", veilAuto: "Auto", veilOn: "On",
+    veilHint: "VEIL reaches Konstruct through a front — an ordinary-looking HTTPS site — where Konstruct is blocked. Auto: directly, and through a front when the direct connection is blocked. On: only through a front; with none answering, nothing is sent.",
+    veilStateOff: "Connected directly.", veilStateConnecting: "Connecting to a front…",
     veilStateUp: "Connected through a front ({front}).", veilStateNoFront: "No front answers: nothing is sent. Add a link from another device.",
     veilFronts: "Fronts on this device: {n}",
     veilAddLink: "Add a front", veilAddLinkHint: "A konstruct://veil-config link from someone whose Konstruct works, or from your other device.",
@@ -207,9 +207,9 @@ const WORDS = {
     quizWrong: "Слова не совпадают. Сверьтесь с записью.", copyConfirmed: "Копия подтверждена",
     enterHint: "Двенадцать слов по порядку через пробел.", save: "Сохранить", phraseAccepted: "Фраза принята",
     about: "О приложении", version: "Версия", logs: "Логи", openLogs: "Открыть папку с логами",
-    veil: "VEIL", veilOff: "Выкл", veilOn: "Вкл",
-    veilHint: "VEIL подключает к Konstruct через фронт — обычный с виду HTTPS-сайт — там, где Konstruct блокируют. Включён: всё идёт только через фронт; если ни один не отвечает, ничего не отправляется.",
-    veilStateOff: "Выключен: соединение напрямую.", veilStateConnecting: "Подключение к фронту…",
+    veil: "VEIL", veilOff: "Выкл", veilAuto: "Авто", veilOn: "Вкл",
+    veilHint: "VEIL подключает к Konstruct через фронт — обычный с виду HTTPS-сайт — там, где Konstruct блокируют. Авто: напрямую, а если прямое соединение блокируют — через фронт. Вкл: только через фронт; если ни один не отвечает, ничего не отправляется.",
+    veilStateOff: "Соединение напрямую.", veilStateConnecting: "Подключение к фронту…",
     veilStateUp: "Подключено через фронт ({front}).", veilStateNoFront: "Ни один фронт не отвечает: ничего не отправляется. Добавьте ссылку с другого устройства.",
     veilFronts: "Фронтов на этом устройстве: {n}",
     veilAddLink: "Добавить фронт", veilAddLinkHint: "Ссылка konstruct://veil-config от того, у кого Konstruct работает, или с вашего другого устройства.",
@@ -1350,7 +1350,7 @@ $("clear-logs").addEventListener("click", () =>
 
 function onVeil(e) {
   for (const b of $("veil-mode").querySelectorAll("[data-value]")) {
-    b.setAttribute("aria-selected", String((b.dataset.value === "on") === e.on));
+    b.setAttribute("aria-selected", String(b.dataset.value === e.mode));
   }
   const states = { off: "veilStateOff", connecting: "veilStateConnecting", up: "veilStateUp", noFront: "veilStateNoFront" };
   const line = t(states[e.state] ?? "veilStateOff", { front: e.front ?? "" });
@@ -1358,10 +1358,11 @@ function onVeil(e) {
   $("veil-state").classList.toggle("error", e.state === "noFront");
   // The same, on the first screen before there is an account.
   const start = $("veil-start-state");
-  start.hidden = !e.on;
+  const through = e.mode !== "off";
+  start.hidden = !through;
   start.textContent = line;
   start.classList.toggle("error", e.state === "noFront");
-  $("veil-start-off").hidden = !e.on;
+  $("veil-start-off").hidden = !through;
 }
 
 function onVeilVoucher(e) {
@@ -1382,10 +1383,10 @@ $("veil-start-connect").addEventListener("click", () => {
   if (!link) return;
   invoke("import_veil_link", { link }).then(() => ($("veil-start-link").value = "")).catch((e) => toast(String(e), true));
 });
-$("veil-start-off").addEventListener("click", () => invoke("set_veil", { on: false }).catch(() => {}));
+$("veil-start-off").addEventListener("click", () => invoke("set_veil", { mode: "off" }).catch(() => {}));
 
 for (const b of $("veil-mode").querySelectorAll("[data-value]")) {
-  b.addEventListener("click", () => invoke("set_veil", { on: b.dataset.value === "on" }));
+  b.addEventListener("click", () => invoke("set_veil", { mode: b.dataset.value }));
 }
 $("veil-import").addEventListener("click", () => {
   const link = $("veil-link").value.trim();
