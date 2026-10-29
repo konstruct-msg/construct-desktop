@@ -1,6 +1,7 @@
-# Publishes a release: pushing a tag `vX.Y.Z` on main builds the Linux packages through the
-# `linux` workflow (the same build, tests and smoke test CI runs) and attaches them, with their
-# SHA-256 sums, to a GitHub release of that name.
+# Publishes a release: pushing a tag `vX.Y.Z` on main builds the Linux packages and the Windows
+# installers through the `linux` and `windows` workflows (the same builds, tests and smoke tests
+# CI runs) and attaches them, with their SHA-256 sums, to a GitHub release of that name. Either
+# build failing stops the release.
 #
 # The tag must match the version in `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`;
 # the version moves by a PR first, the tag follows the merge (README, "Releasing").
@@ -29,12 +30,16 @@ jobs:
           git fetch --quiet origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "the tag is not on main"; exit 1; }
 
-  build:
+  linux:
     needs: version
     uses: ./.github/workflows/linux.yml
 
+  windows:
+    needs: version
+    uses: ./.github/workflows/windows.yml
+
   publish:
-    needs: build
+    needs: [linux, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -43,6 +48,10 @@ jobs:
         with:
           name: konstruct-linux
           path: bundle
+      - uses: actions/download-artifact@v4
+        with:
+          name: konstruct-windows
+          path: bundle-windows
 
       - name: Release
         env:
@@ -51,23 +60,30 @@ jobs:
         run: |
           mkdir dist
           find bundle -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) -exec cp {} dist/ \;
+          find bundle-windows -type f \( -name '*.exe' -o -name '*.msi' \) -exec cp {} dist/ \;
           (cd dist && sha256sum * > SHA256SUMS)
           cat dist/SHA256SUMS
 
           {
-            echo "Konstruct for Linux, $TAG."
+            echo "Konstruct for Linux and Windows, $TAG."
             echo
             echo "| Package | For |"
             echo "|---|---|"
             echo "| \`.deb\` | Ubuntu, Linux Mint, Debian: \`sudo apt install ./Konstruct_*.deb\` |"
             echo "| \`.rpm\` | Fedora, openSUSE: \`sudo dnf install ./Konstruct-*.rpm\` |"
             echo "| \`.AppImage\` | any distribution: \`chmod +x Konstruct_*.AppImage\` and run it |"
+            echo "| \`_x64-setup.exe\` | Windows 10 and 11: run it (installs for this user) |"
+            echo "| \`.msi\` | Windows, for installing through policy or for all users |"
             echo
-            echo "Check a download with \`sha256sum -c SHA256SUMS --ignore-missing\`."
+            echo "The Windows installers are not signed yet: SmartScreen warns — **More info → Run anyway**."
             echo
-            echo "Built from:"
+            echo "Check a download with \`sha256sum -c SHA256SUMS --ignore-missing\` (on Windows: \`certutil -hashfile <file> SHA256\` and compare)."
+            echo
+            echo "Built from (Linux, then Windows):"
             echo '```'
             cat bundle/siblings.txt
+            echo
+            cat bundle-windows/siblings.txt
             echo '```'
           } > notes.md
 
