@@ -9,7 +9,7 @@
 
 use construct_client::media::AutoDownload;
 use construct_client::{
-    ClientCommand, ClientConfig, ClientEvent, ClientHandle,
+    ClientCommand, ClientConfig, ClientEvent, ClientHandle, VeilMode, VeilState,
     bridge::BridgeEvent,
     config::SessionState,
     local_store::{Attachment, MediaInfo, StoredMessage},
@@ -96,6 +96,20 @@ pub enum ViewEvent {
     /// The packs the server offers that the picker does not; or why they could not be read.
     StickerCatalog {
         packs: Vec<CatalogRow>,
+        error: Option<String>,
+    },
+    /// Where VEIL stands. `state`: `off`, `connecting`, `up` (through `front`, its log label in
+    /// a release build), `noFront` (on, and nothing is sent).
+    Veil {
+        on: bool,
+        state: &'static str,
+        front: Option<String>,
+        fronts: usize,
+    },
+    /// A voucher link for another device and its end (Unix seconds); or why there is none.
+    VeilVoucher {
+        link: Option<String>,
+        exp: i64,
         error: Option<String>,
     },
     /// File `index` of a message was saved in the downloads folder under `name`.
@@ -450,6 +464,12 @@ pub enum Intent {
         alias: Option<String>,
     },
     RenameDevice(String),
+    /// VEIL off or on.
+    SetVeil(bool),
+    /// A `konstruct://veil-config` link pasted in.
+    ImportVeilLink(String),
+    LoadVeil,
+    IssueVeilVoucher,
     /// The sticker picker.
     LoadStickers,
     /// A sticker's picture.
@@ -1012,6 +1032,14 @@ fn handle_intent(
             alias,
         }),
         Intent::RenameDevice(name) => client.send(ClientCommand::RenameDevice(name)),
+        Intent::SetVeil(on) => client.send(ClientCommand::SetVeilMode(if on {
+            VeilMode::On
+        } else {
+            VeilMode::Off
+        })),
+        Intent::ImportVeilLink(link) => client.send(ClientCommand::ImportVeilLink(link)),
+        Intent::LoadVeil => client.send(ClientCommand::LoadVeil),
+        Intent::IssueVeilVoucher => client.send(ClientCommand::IssueVeilVoucher),
         Intent::LoadStickers => client.send(ClientCommand::LoadStickers),
         Intent::LoadSticker(sticker) => client.send(ClientCommand::LoadSticker(sticker)),
         Intent::SendSticker {
@@ -1443,6 +1471,32 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             }
             out
         }
+        ClientEvent::Veil(status) => {
+            let (state, front) = match status.state {
+                VeilState::Off => ("off", None),
+                VeilState::Connecting => ("connecting", None),
+                VeilState::Up { front } => ("up", Some(front)),
+                VeilState::NoFront => ("noFront", None),
+            };
+            vec![ViewEvent::Veil {
+                on: status.mode == VeilMode::On,
+                state,
+                front,
+                fronts: status.fronts,
+            }]
+        }
+        ClientEvent::VeilVoucher(result) => vec![match result {
+            Ok((link, exp)) => ViewEvent::VeilVoucher {
+                link: Some(link),
+                exp,
+                error: None,
+            },
+            Err(error) => ViewEvent::VeilVoucher {
+                link: None,
+                exp: 0,
+                error: Some(error),
+            },
+        }],
         ClientEvent::Stickers { packs, recent } => vec![ViewEvent::Stickers {
             packs: packs
                 .into_iter()
@@ -2402,6 +2456,41 @@ mod tests {
         message.attachment = Some("sticker");
         message.sticker = Some(sticker.into());
         assert_eq!(preview(&message), "🐱");
+    }
+
+    /// The page is told where VEIL stands in its own words: on or off, the state, the front by the
+    /// name the client gives it (a label in a release build), how many fronts there are.
+    #[test]
+    fn veil_status_reaches_the_page() {
+        use construct_client::VeilStatus;
+        let mut model = model();
+        let status = |state| {
+            ClientEvent::Veil(VeilStatus {
+                mode: VeilMode::On,
+                state,
+                fronts: 2,
+            })
+        };
+        let out = on_client_event(
+            status(VeilState::Up {
+                front: "front#0a1b2c3d".into(),
+            }),
+            &mut model,
+            "",
+        );
+        assert!(
+            matches!(&out[..], [ViewEvent::Veil { on: true, state: "up", front: Some(f), fronts: 2 }]
+            if f == "front#0a1b2c3d")
+        );
+        let out = on_client_event(status(VeilState::NoFront), &mut model, "");
+        assert!(matches!(
+            &out[..],
+            [ViewEvent::Veil {
+                state: "noFront",
+                front: None,
+                ..
+            }]
+        ));
     }
 
     fn row(text: &str, sent: bool) -> MessageRow {

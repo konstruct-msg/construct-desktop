@@ -48,6 +48,15 @@ const WORDS = {
     quizWrong: "Those words don't match. Look at your copy again.", copyConfirmed: "Copy confirmed",
     enterHint: "The twelve words, in order, separated by spaces.", save: "Save", phraseAccepted: "Phrase accepted",
     about: "About", version: "Version", logs: "Logs", openLogs: "Open logs folder",
+    veil: "VEIL", veilOff: "Off", veilOn: "On",
+    veilHint: "VEIL reaches Konstruct through a front — an ordinary-looking HTTPS site — where Konstruct is blocked. On: nothing goes anywhere but through a front; with none answering, nothing is sent.",
+    veilStateOff: "Off: connected directly.", veilStateConnecting: "Connecting to a front…",
+    veilStateUp: "Connected through a front ({front}).", veilStateNoFront: "No front answers: nothing is sent. Add a link from another device.",
+    veilFronts: "Fronts on this device: {n}",
+    veilAddLink: "Add a front", veilAddLinkHint: "A konstruct://veil-config link from someone whose Konstruct works, or from your other device.",
+    veilLinkPlaceholder: "konstruct://veil-config?d=…", veilImport: "Add",
+    veilVoucher: "A link for someone else", veilVoucherHint: "For a person or device that cannot reach Konstruct: a link to one front, valid for a short time. Up to three a day.",
+    veilVoucherMake: "Make a link", veilVoucherExp: "Valid until {time}.",
     diagnostics: "Diagnostics", logsSize: "Size", saveLogs: "Save logs", clearLogs: "Clear logs",
     recentLogs: "Recent lines", logsEmpty: "Nothing written yet", logsCleared: "Logs cleared",
     logsSaved: "Logs saved to Downloads: {name}. Click to show the folder; attach the file to your report.",
@@ -195,6 +204,15 @@ const WORDS = {
     quizWrong: "Слова не совпадают. Сверьтесь с записью.", copyConfirmed: "Копия подтверждена",
     enterHint: "Двенадцать слов по порядку через пробел.", save: "Сохранить", phraseAccepted: "Фраза принята",
     about: "О приложении", version: "Версия", logs: "Логи", openLogs: "Открыть папку с логами",
+    veil: "VEIL", veilOff: "Выкл", veilOn: "Вкл",
+    veilHint: "VEIL подключает к Konstruct через фронт — обычный с виду HTTPS-сайт — там, где Konstruct блокируют. Включён: всё идёт только через фронт; если ни один не отвечает, ничего не отправляется.",
+    veilStateOff: "Выключен: соединение напрямую.", veilStateConnecting: "Подключение к фронту…",
+    veilStateUp: "Подключено через фронт ({front}).", veilStateNoFront: "Ни один фронт не отвечает: ничего не отправляется. Добавьте ссылку с другого устройства.",
+    veilFronts: "Фронтов на этом устройстве: {n}",
+    veilAddLink: "Добавить фронт", veilAddLinkHint: "Ссылка konstruct://veil-config от того, у кого Konstruct работает, или с вашего другого устройства.",
+    veilLinkPlaceholder: "konstruct://veil-config?d=…", veilImport: "Добавить",
+    veilVoucher: "Ссылка для другого", veilVoucherHint: "Тому, кто не может подключиться к Konstruct: ссылка на один фронт, действует недолго. Не больше трёх в день.",
+    veilVoucherMake: "Сделать ссылку", veilVoucherExp: "Действует до {time}.",
     diagnostics: "Диагностика", logsSize: "Размер", saveLogs: "Сохранить логи", clearLogs: "Очистить логи",
     recentLogs: "Последние строки", logsEmpty: "Пока ничего не записано", logsCleared: "Логи очищены",
     logsSaved: "Логи сохранены в «Загрузки»: {name}. Нажмите, чтобы открыть папку, и приложите файл к сообщению.",
@@ -1322,10 +1340,48 @@ $("clear-logs").addEventListener("click", () =>
   invoke("clear_logs").then(() => { toast(t("logsCleared")); renderLogs(); }).catch((e) => toast(String(e), true)),
 );
 
+// ── VEIL ────────────────────────────────────────────────────────────────────
+
+function onVeil(e) {
+  for (const b of $("veil-mode").querySelectorAll("[data-value]")) {
+    b.setAttribute("aria-selected", String((b.dataset.value === "on") === e.on));
+  }
+  const states = { off: "veilStateOff", connecting: "veilStateConnecting", up: "veilStateUp", noFront: "veilStateNoFront" };
+  const line = t(states[e.state] ?? "veilStateOff", { front: e.front ?? "" });
+  $("veil-state").textContent = `${line} ${t("veilFronts", { n: e.fronts })}`;
+  $("veil-state").classList.toggle("error", e.state === "noFront");
+}
+
+function onVeilVoucher(e) {
+  $("veil-voucher").disabled = false;
+  if (e.error) return toast(e.error, true);
+  $("veil-voucher-link").value = e.link;
+  $("veil-voucher-exp").textContent = t("veilVoucherExp", { time: clock(e.exp * 1000) });
+  $("veil-voucher-out").hidden = false;
+}
+
+for (const b of $("veil-mode").querySelectorAll("[data-value]")) {
+  b.addEventListener("click", () => invoke("set_veil", { on: b.dataset.value === "on" }));
+}
+$("veil-import").addEventListener("click", () => {
+  const link = $("veil-link").value.trim();
+  if (!link) return;
+  invoke("import_veil_link", { link }).then(() => ($("veil-link").value = "")).catch((e) => toast(String(e), true));
+});
+$("veil-voucher").addEventListener("click", (ev) => {
+  ev.currentTarget.disabled = true;
+  invoke("issue_veil_voucher").catch((e) => toast(String(e), true));
+});
+$("veil-voucher-copy").addEventListener("click", async () => {
+  await navigator.clipboard.writeText($("veil-voucher-link").value);
+  toast(t("copied"));
+});
+
 function showPane(name) {
   for (const p of document.querySelectorAll(".settings-pane")) p.hidden = p.dataset.pane !== name;
   for (const b of $("settings-nav").querySelectorAll("[data-pane]")) b.setAttribute("aria-current", String(b.dataset.pane === name));
   if (name === "diagnostics") renderLogs();
+  if (name === "veil") invoke("load_veil").catch(() => {});
 }
 $("settings-nav").addEventListener("click", (ev) => {
   const b = ev.target.closest("[data-pane]");
@@ -2044,6 +2100,8 @@ function onEvent(e) {
     case "delivered": markDelivered(e.messageId); break;
     case "media": onMedia(e); break;
     case "stickers": onStickers(e); break;
+    case "veil": onVeil(e); break;
+    case "veilVoucher": onVeilVoucher(e); break;
     case "stickerImage": onStickerImage(e); break;
     case "stickerCatalog": onStickerCatalog(e); break;
     case "mediaSaved": onMediaSaved(e); break;
