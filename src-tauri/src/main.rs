@@ -245,8 +245,8 @@ fn share_profile(peer_id: String, on: bool, intents: State<Intents>) {
 }
 
 #[tauri::command]
-fn set_veil(on: bool, intents: State<Intents>) {
-    intents.send(Intent::SetVeil(on));
+fn set_veil(mode: String, intents: State<Intents>) {
+    intents.send(Intent::SetVeil(mode));
 }
 
 #[tauri::command]

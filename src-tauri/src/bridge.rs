@@ -101,7 +101,8 @@ pub enum ViewEvent {
     /// Where VEIL stands. `state`: `off`, `connecting`, `up` (through `front`, its log label in
     /// a release build), `noFront` (on, and nothing is sent).
     Veil {
-        on: bool,
+        /// `off`, `auto`, `on`.
+        mode: &'static str,
         state: &'static str,
         front: Option<String>,
         fronts: usize,
@@ -464,8 +465,8 @@ pub enum Intent {
         alias: Option<String>,
     },
     RenameDevice(String),
-    /// VEIL off or on.
-    SetVeil(bool),
+    /// VEIL `off`, `auto` or `on`.
+    SetVeil(String),
     /// A `konstruct://veil-config` link pasted in.
     ImportVeilLink(String),
     LoadVeil,
@@ -1032,10 +1033,10 @@ fn handle_intent(
             alias,
         }),
         Intent::RenameDevice(name) => client.send(ClientCommand::RenameDevice(name)),
-        Intent::SetVeil(on) => client.send(ClientCommand::SetVeilMode(if on {
-            VeilMode::On
-        } else {
-            VeilMode::Off
+        Intent::SetVeil(mode) => client.send(ClientCommand::SetVeilMode(match mode.as_str() {
+            "on" => VeilMode::On,
+            "off" => VeilMode::Off,
+            _ => VeilMode::Auto,
         })),
         Intent::ImportVeilLink(link) => client.send(ClientCommand::ImportVeilLink(link)),
         Intent::LoadVeil => client.send(ClientCommand::LoadVeil),
@@ -1479,7 +1480,11 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
                 VeilState::NoFront => ("noFront", None),
             };
             vec![ViewEvent::Veil {
-                on: status.mode == VeilMode::On,
+                mode: match status.mode {
+                    VeilMode::Off => "off",
+                    VeilMode::Auto => "auto",
+                    VeilMode::On => "on",
+                },
                 state,
                 front,
                 fronts: status.fronts,
@@ -2479,7 +2484,7 @@ mod tests {
             "",
         );
         assert!(
-            matches!(&out[..], [ViewEvent::Veil { on: true, state: "up", front: Some(f), fronts: 2 }]
+            matches!(&out[..], [ViewEvent::Veil { mode: "on", state: "up", front: Some(f), fronts: 2 }]
             if f == "front#0a1b2c3d")
         );
         let out = on_client_event(status(VeilState::NoFront), &mut model, "");
