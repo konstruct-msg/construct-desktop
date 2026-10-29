@@ -245,6 +245,26 @@ fn share_profile(peer_id: String, on: bool, intents: State<Intents>) {
 }
 
 #[tauri::command]
+fn set_veil(on: bool, intents: State<Intents>) {
+    intents.send(Intent::SetVeil(on));
+}
+
+#[tauri::command]
+fn import_veil_link(link: String, intents: State<Intents>) {
+    intents.send(Intent::ImportVeilLink(link));
+}
+
+#[tauri::command]
+fn load_veil(intents: State<Intents>) {
+    intents.send(Intent::LoadVeil);
+}
+
+#[tauri::command]
+fn issue_veil_voucher(intents: State<Intents>) {
+    intents.send(Intent::IssueVeilVoucher);
+}
+
+#[tauri::command]
 fn load_stickers(intents: State<Intents>) {
     intents.send(Intent::LoadStickers);
 }
@@ -524,11 +544,43 @@ async fn blocking<T: Send + 'static>(
         .map_err(|e| e.to_string())?
 }
 
+/// A log writer that keeps VEIL fronts and IP addresses out of what it writes: in a release
+/// build they become labels keyed to this device (construct-docs
+/// decisions/veil-front-in-logs-is-a-keyed-label). Logs are what a person sends when something
+/// is wrong; a front's address in them is one more address to block.
+struct Redacted<M>(M);
+
+impl<'a, M: tracing_subscriber::fmt::MakeWriter<'a>> tracing_subscriber::fmt::MakeWriter<'a>
+    for Redacted<M>
+{
+    type Writer = RedactedWriter<M::Writer>;
+    fn make_writer(&'a self) -> Self::Writer {
+        RedactedWriter(self.0.make_writer())
+    }
+}
+
+struct RedactedWriter<W>(W);
+
+impl<W: std::io::Write> std::io::Write for RedactedWriter<W> {
+    // The formatter hands over one whole event per write.
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let text = String::from_utf8_lossy(buf);
+        self.0
+            .write_all(construct_client::veil::redact::redact(&text).as_bytes())?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
 /// Log to the terminal and to a file a day in `dir`, the last week kept: an app started from
 /// the menu has no terminal, and the logs are what a person can send when something is wrong.
-/// They stay on this computer; message text is never logged.
+/// They stay on this computer; message text is never logged, fronts and addresses are labels.
 fn init_logging(dir: &std::path::Path) {
     use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+    construct_client::veil::redact::init(dir);
     let filter = || {
         EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| EnvFilter::new("info,h2=warn,rustls=warn"))
@@ -544,13 +596,17 @@ fn init_logging(dir: &std::path::Path) {
                 .build(dir)
                 .map_err(|e| e.to_string())
         });
-    let registry = tracing_subscriber::registry().with(fmt::layer().with_filter(filter()));
+    let registry = tracing_subscriber::registry().with(
+        fmt::layer()
+            .with_writer(Redacted(std::io::stdout))
+            .with_filter(filter()),
+    );
     match file {
         Ok(appender) => registry
             .with(
                 fmt::layer()
                     .with_ansi(false)
-                    .with_writer(appender)
+                    .with_writer(Redacted(appender))
                     .with_filter(filter()),
             )
             .init(),
@@ -626,6 +682,10 @@ fn main() {
             set_alias,
             rename_device,
             load_media,
+            set_veil,
+            import_veil_link,
+            load_veil,
+            issue_veil_voucher,
             load_stickers,
             load_sticker,
             send_sticker,

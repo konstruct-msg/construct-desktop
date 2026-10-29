@@ -209,6 +209,7 @@
       <button type="button" data-pane="devices" data-t="devices"></button>
       <button type="button" data-pane="chats" data-t="chatsAndLook"></button>
       <button type="button" data-pane="privacy" data-t="notificationsAndPrivacy"></button>
+      <button type="button" data-pane="veil" data-t="veil"></button>
       <button type="button" data-pane="storage" data-t="dataAndStorage"></button>
       <button type="button" data-pane="recovery" data-t="recoveryKey"></button>
       <button type="button" data-pane="diagnostics" data-t="diagnostics"></button>
@@ -312,6 +313,27 @@
         <label class="toggle"><input type="checkbox" data-pref-flag="sendOnEnter"><span data-t="sendOnEnter"></span></label>
         <p class="small dim" data-t="sendOnEnterHint"></p>
         <label class="toggle"><input type="checkbox" data-pref-flag="showTimes"><span data-t="showTimes"></span></label>
+      </section>
+      <section class="settings-pane" data-pane="veil" hidden>
+        <h3 class="section" data-t="veil"></h3>
+        <p class="small dim" data-t="veilHint"></p>
+        <div class="row choice" id="veil-mode">
+          <button type="button" class="tab" data-value="off" data-t="veilOff"></button>
+          <button type="button" class="tab" data-value="on" data-t="veilOn"></button>
+        </div>
+        <p id="veil-state" class="small"></p>
+        <h3 class="section" data-t="veilAddLink"></h3>
+        <p class="small dim" data-t="veilAddLinkHint"></p>
+        <textarea id="veil-link" class="field mono small" rows="3" spellcheck="false" data-tp="veilLinkPlaceholder"></textarea>
+        <div class="row"><button type="button" class="secondary" id="veil-import" data-t="veilImport"></button></div>
+        <h3 class="section" data-t="veilVoucher"></h3>
+        <p class="small dim" data-t="veilVoucherHint"></p>
+        <div class="row"><button type="button" class="secondary" id="veil-voucher" data-t="veilVoucherMake"></button></div>
+        <div id="veil-voucher-out" hidden>
+          <textarea id="veil-voucher-link" class="field mono small" rows="3" readonly></textarea>
+          <p id="veil-voucher-exp" class="small dim"></p>
+          <div class="row"><button type="button" class="secondary" id="veil-voucher-copy" data-t="copy"></button></div>
+        </div>
       </section>
       <section class="settings-pane" data-pane="privacy" hidden>
         <h3 class="section" data-t="notifications"></h3>
