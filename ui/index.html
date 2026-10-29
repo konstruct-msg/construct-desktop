@@ -31,6 +31,16 @@
       <input id="alias" class="field" autocomplete="off" spellcheck="false" data-tp="aliasPlaceholder">
       <button type="submit" class="primary" data-t="createIdentity"></button>
       <button type="button" class="link" id="go-link" data-t="linkThisDevice"></button>
+      <button type="button" class="link small dim" id="veil-start-open" data-t="veilNoAccess"></button>
+      <div id="veil-start" class="veil-start" hidden>
+        <p class="small dim" data-t="veilStartHint"></p>
+        <textarea id="veil-start-link" class="field mono small" rows="3" spellcheck="false" data-tp="veilLinkPlaceholder"></textarea>
+        <div class="row">
+          <button type="button" class="secondary" id="veil-start-connect" data-t="veilConnect"></button>
+          <button type="button" class="link small" id="veil-start-off" data-t="veilDisconnect" hidden></button>
+        </div>
+        <p id="veil-start-state" class="small" hidden></p>
+      </div>
       <button type="button" class="link small dim save-logs" data-t="saveLogs"></button>
     </form>
   </section>
