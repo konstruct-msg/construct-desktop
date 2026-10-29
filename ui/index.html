@@ -145,10 +145,25 @@
           <input type="file" id="attach-file" hidden>
           <input type="file" id="attach-photo" accept="image/*,video/*" hidden>
           <textarea id="draft" rows="1" data-tp="messagePlaceholder"></textarea>
-          <button type="submit" class="send" id="send" data-tl="send" disabled>
+          <button type="submit" class="send" id="send" data-tl="send" disabled hidden>
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16V8M8.5 11.5 12 8l3.5 3.5"/></svg>
           </button>
+          <!-- With nothing typed, as on iOS: a voice note -->
+          <button type="button" class="mic icon" id="mic" data-tl="recordVoice">
+            <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>
+          </button>
         </form>
+        <div id="recorder" class="recorder" hidden>
+          <button type="button" class="icon" id="voice-cancel" data-tl="cancel">
+            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+          <span class="rec-dot" aria-hidden="true"></span>
+          <span id="voice-time" class="voice-time">0:00</span>
+          <div id="voice-live" class="voice-bars live" aria-hidden="true"></div>
+          <button type="button" class="send" id="voice-send" data-tl="send">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16V8M8.5 11.5 12 8l3.5 3.5"/></svg>
+          </button>
+        </div>
       </div>
     </main>
   </section>

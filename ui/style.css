@@ -401,3 +401,25 @@ dialog.settings[open] { display: grid; grid-template-columns: 200px 1fr; }
 :root[data-text-size="compact"] .bubble { font-size: 13px; }
 :root[data-text-size="large"] .bubble { font-size: 17px; }
 :root[data-times="off"] .msg .meta .time { display: none; }
+
+/* Voice notes: the microphone, the recording bar, the player in a bubble. */
+.mic { width: 42px; height: 42px; flex: none; display: flex; align-items: center; justify-content: center; }
+.mic svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.recorder { display: flex; gap: 10px; align-items: center; padding: 10px 16px; flex: none; }
+.recorder .icon svg { width: 22px; height: 22px; stroke: currentColor; stroke-width: 1.6; }
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); flex: none;
+  animation: rec-blink 1s steps(2, start) infinite; }
+@keyframes rec-blink { to { visibility: hidden; } }
+.voice-time { font-variant-numeric: tabular-nums; min-width: 3.2em; color: var(--dim); font-size: 13px; }
+.voice-bars { display: flex; align-items: center; gap: 2px; height: 28px; flex: 1; min-width: 0; }
+.voice-bars span { flex: 1; max-width: 4px; min-height: 2px; border-radius: 1px; background: var(--dim); opacity: .55; }
+.voice-bars span.played { background: var(--accent); opacity: 1; }
+.voice-bars.live { justify-content: flex-end; overflow: hidden; }
+.voice-bars.live span { flex: none; width: 3px; background: var(--accent); opacity: 1; }
+.media .voice { display: flex; align-items: center; gap: 10px; width: 280px; max-width: 100%; }
+.media .voice .voice-bars { cursor: pointer; touch-action: none; }
+.media .voice .voice-play { width: 36px; height: 36px; flex: none; border-radius: 50%; border: none;
+  background: var(--accent); color: #fff; font-size: 14px; }
+.media .voice .voice-speed { flex: none; border: 1px solid var(--noise); background: none; border-radius: 10px;
+  padding: 1px 6px; font: 12px var(--sans); color: var(--dim); min-width: 3.2em; }
+.media .voice .voice-side { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }

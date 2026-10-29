@@ -137,6 +137,7 @@ const WORDS = {
     attachment_other: "Attachment", attachmentHint: "Not shown here yet — open it on your phone.",
     save: "Save", saved: "Saved to Downloads: {name}. Click to show the folder.",
     loading: "Loading…", mediaFailed: "Did not load: {reason}", retry: "Try again",
+    recordVoice: "Record a voice message", pause: "Pause", voiceSpeed: "Playback speed",
     play: "Play", close: "Close", attach: "Attach", sending: "Sending {name}…",
     stickers: "Stickers", photoOrVideo: "Photo…", fileEllipsis: "File…",
     recentStickers: "Recent", morePacks: "More packs", addPack: "Add", removePack: "Remove", confirmRemovePack: "Remove?",
@@ -304,6 +305,7 @@ const WORDS = {
     attachment_other: "Вложение", attachmentHint: "Здесь пока не показывается — откройте на телефоне.",
     save: "Сохранить", saved: "Сохранено в «Загрузки»: {name}. Нажмите, чтобы открыть папку.",
     loading: "Загрузка…", mediaFailed: "Не загрузилось: {reason}", retry: "Повторить",
+    recordVoice: "Записать голосовое сообщение", pause: "Пауза", voiceSpeed: "Скорость воспроизведения",
     play: "Воспроизвести", close: "Закрыть", attach: "Прикрепить", sending: "Отправляется {name}…",
     stickers: "Стикеры", photoOrVideo: "Фото…", fileEllipsis: "Файл…",
     recentStickers: "Недавние", morePacks: "Ещё наборы", addPack: "Добавить", removePack: "Убрать", confirmRemovePack: "Убрать?",
@@ -574,6 +576,7 @@ function chatName(peerId) {
 
 function openChat(peerId) {
   if (state.open !== peerId && state.compose) cancelCompose();
+  if (state.open !== peerId && recording) stopRecording(false);
   closeMessageMenu();
   closePicker();
   state.open = peerId;
@@ -589,6 +592,7 @@ function openChat(peerId) {
 }
 
 function closeChat() {
+  if (recording) stopRecording(false);
   state.open = null;
   $("chat").hidden = true;
   $("empty").hidden = false;
@@ -746,6 +750,10 @@ function mediaNode(m, item, index, play = false) {
     img.alt = t(`attachment_${item.kind}`);
     img.addEventListener("click", () => openViewer(m, index, entry.url));
     node.append(img);
+    return node;
+  }
+  if (item.kind === "voice" && entry?.url !== null && !entry?.error) {
+    node.append(voiceNode(m, item, index, entry));
     return node;
   }
   if (sound && entry?.url) {
@@ -954,7 +962,12 @@ function fitDraft() {
   const wanted = draft.scrollHeight + border;
   draft.style.height = `${Math.min(wanted, 180)}px`;
   draft.style.overflowY = wanted > 180 ? "auto" : "hidden";
-  $("send").disabled = draft.value.trim() === "";
+  const empty = draft.value.trim() === "";
+  $("send").disabled = empty;
+  // Nothing typed: the microphone takes the send button's place, as on iOS (not while editing).
+  const mic = empty && state.compose?.mode !== "edit";
+  $("send").hidden = mic;
+  $("mic").hidden = !mic;
 }
 function sendDraft() {
   const text = draft.value.trim();
@@ -1409,6 +1422,161 @@ $("update-install").addEventListener("click", () =>
 $("update-page").addEventListener("click", () =>
   invoke("open_release_page").catch((err) => toast(String(err), true)),
 );
+
+// ── Voice notes ─────────────────────────────────────────────────────────────
+// Rust records and encodes (voice.rs); the page shows the bar and plays what Rust decoded. As on
+// iOS: a tap on the microphone records, the bars show how loud it is; a note plays with its
+// waveform, seeks where the bars are let go, and plays at 1, 1.25, 1.5 or 2× — the speed kept.
+
+let recording = null; // {peerId} while a note is recorded
+const LIVE_BARS = 40;
+const SPEEDS = [1, 1.25, 1.5, 2];
+let voiceSpeed = SPEEDS.includes(Number(store.get("voiceSpeed"))) ? Number(store.get("voiceSpeed")) : 1;
+const players = new Map(); // mediaKey → HTMLAudioElement
+let wantPlay = null; // mediaKey asked to play before its sound was here
+
+$("mic").addEventListener("click", () => {
+  if (!state.open || recording) return;
+  recording = { peerId: state.open };
+  invoke("start_voice", { peerId: state.open }).catch((err) => {
+    recording = null;
+    toast(String(err), true);
+  });
+});
+$("voice-cancel").addEventListener("click", () => stopRecording(false));
+$("voice-send").addEventListener("click", () => stopRecording(true));
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && recording) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    stopRecording(false);
+  }
+}, true);
+
+function stopRecording(send) {
+  invoke("stop_voice", { send }).catch((err) => toast(String(err), true));
+}
+
+function onRecording(e) {
+  const live = $("voice-live");
+  if (!e.recording) {
+    recording = null;
+    $("recorder").hidden = true;
+    $("composer").hidden = false;
+    live.replaceChildren();
+    fitDraft();
+    return;
+  }
+  recording = { peerId: e.peerId };
+  if (e.peerId !== state.open) return;
+  $("composer").hidden = true;
+  $("recorder").hidden = false;
+  $("voice-time").textContent = duration(e.elapsedMs);
+  const bar = el("span");
+  bar.style.height = `${Math.max(2, Math.round(e.level * 28))}px`;
+  live.append(bar);
+  while (live.children.length > LIVE_BARS) live.firstChild.remove();
+}
+
+/** `bars` (0..=255) as at most `n` bars, each the mean of those it stands for. */
+function fewerBars(bars, n) {
+  if (!bars?.length) return new Array(n).fill(64);
+  if (bars.length <= n) return bars;
+  const step = bars.length / n;
+  return Array.from({ length: n }, (_, i) => {
+    const slice = bars.slice(Math.floor(i * step), Math.max(Math.floor((i + 1) * step), Math.floor(i * step) + 1));
+    return slice.reduce((a, b) => a + b, 0) / slice.length;
+  });
+}
+
+function voiceNode(m, item, index, entry) {
+  const key = mediaKey(m.id, index);
+  const box = el("div", "voice");
+  const button = el("button", "voice-play");
+  button.type = "button";
+  const bars = el("div", "voice-bars");
+  const heights = fewerBars(item.waveform, 48);
+  for (const v of heights) {
+    const bar = el("span");
+    bar.style.height = `${Math.max(2, Math.round((v / 255) * 28))}px`;
+    bars.append(bar);
+  }
+  const side = el("div", "voice-side");
+  const time = el("span", "voice-time");
+  const speed = el("button", "voice-speed", `${voiceSpeed}×`);
+  speed.type = "button";
+  speed.setAttribute("aria-label", t("voiceSpeed"));
+  side.append(time, speed);
+  box.append(button, bars, side);
+
+  let audio = players.get(key);
+  if (!audio && entry?.url) {
+    audio = new Audio(entry.url);
+    audio.playbackRate = voiceSpeed;
+    players.set(key, audio);
+  }
+  const total = () => (audio && Number.isFinite(audio.duration) ? audio.duration * 1000 : item.durationMs);
+  const draw = (fraction = audio && total() ? (audio.currentTime * 1000) / total() : 0) => {
+    const lit = Math.round(fraction * heights.length);
+    bars.childNodes.forEach((b, i) => b.classList.toggle("played", i < lit));
+    const playing = audio && !audio.paused;
+    button.textContent = entry?.loading ? "…" : playing ? "❚❚" : "▶";
+    button.setAttribute("aria-label", playing ? t("pause") : t("play"));
+    time.textContent = duration(playing || fraction > 0 ? fraction * total() : total());
+  };
+  if (audio) {
+    audio.ontimeupdate = () => draw();
+    audio.onpause = () => draw();
+    audio.onplay = () => draw();
+    audio.onended = () => { audio.currentTime = 0; draw(0); };
+  }
+  const start = () => {
+    for (const [k, other] of players) if (k !== key) other.pause();
+    audio.play().catch((err) => toast(String(err), true));
+  };
+  button.addEventListener("click", () => {
+    if (!audio) {
+      wantPlay = key;
+      loadMedia(m, index);
+      redrawMedia(m.id, index);
+      return;
+    }
+    if (audio.paused) start();
+    else audio.pause();
+  });
+  speed.addEventListener("click", () => {
+    voiceSpeed = SPEEDS[(SPEEDS.indexOf(voiceSpeed) + 1) % SPEEDS.length];
+    store.set("voiceSpeed", String(voiceSpeed));
+    for (const p of players.values()) p.playbackRate = voiceSpeed;
+    for (const b of document.querySelectorAll(".voice-speed")) b.textContent = `${voiceSpeed}×`;
+  });
+  // Seeking: the bars follow the pointer, the sound moves where it is let go; paused stays paused.
+  const at = (ev) => {
+    const r = bars.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width));
+  };
+  bars.addEventListener("pointerdown", (ev) => {
+    if (!audio) return;
+    bars.setPointerCapture(ev.pointerId);
+    draw(at(ev));
+    const move = (e) => draw(at(e));
+    const up = (e) => {
+      bars.removeEventListener("pointermove", move);
+      bars.removeEventListener("pointerup", up);
+      if (Number.isFinite(audio.duration)) audio.currentTime = at(e) * audio.duration;
+      draw();
+    };
+    bars.addEventListener("pointermove", move);
+    bars.addEventListener("pointerup", up);
+  });
+  draw();
+  // Asked to play before the sound was fetched: it plays once it is here.
+  if (audio && wantPlay === key) {
+    wantPlay = null;
+    start();
+  }
+  return box;
+}
 
 // ── VEIL ────────────────────────────────────────────────────────────────────
 
@@ -2190,6 +2358,7 @@ function onEvent(e) {
     case "media": onMedia(e); break;
     case "stickers": onStickers(e); break;
     case "veil": onVeil(e); break;
+    case "recording": onRecording(e); break;
     case "update": onUpdate(e); break;
     case "veilVoucher": onVeilVoucher(e); break;
     case "stickerImage": onStickerImage(e); break;

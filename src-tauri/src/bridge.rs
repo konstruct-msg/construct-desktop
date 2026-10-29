@@ -107,6 +107,14 @@ pub enum ViewEvent {
         front: Option<String>,
         fronts: usize,
     },
+    /// A voice note being recorded for `peer_id` (`voice`): its length so far and how loud the
+    /// microphone is now, 0..=1; `recording` false once it ended.
+    Recording {
+        peer_id: String,
+        recording: bool,
+        elapsed_ms: u32,
+        level: f32,
+    },
     /// Where updating stands (`update`): `state` `checking`, `current`, `available`, `installing`,
     /// `failed`; `install` how this copy gets it: `itself`, `deb`, `rpm`, `manual`.
     Update {
@@ -398,6 +406,8 @@ pub struct MediaRow {
     pub width: u32,
     pub height: u32,
     pub duration_ms: u32,
+    /// A voice note's bars, 0..=255 each.
+    pub waveform: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -421,6 +431,13 @@ pub enum Intent {
     Attach(Channel<ViewEvent>),
     /// Not the person's: what the update check found (`update`), to show and keep.
     Update(ViewEvent),
+    /// Not the person's: a recording's progress (`voice`), to show.
+    Recording(ViewEvent),
+    /// A voice note recorded for `peer_id`, to send.
+    SendVoice {
+        peer_id: String,
+        voice: construct_client::outgoing::Voice,
+    },
     Register(String),
     StartLink,
     CancelLink,
@@ -878,6 +895,11 @@ fn handle_intent(
             model.update = Some(event.clone());
             send(view, event);
         }
+        Intent::Recording(event) => send(view, event),
+        Intent::SendVoice { peer_id, voice } => client.send(ClientCommand::SendVoice {
+            contact_id: peer_id,
+            voice,
+        }),
         Intent::Register(username) => {
             client.send(ClientCommand::Register { username });
             model.screen = Screen::Registering;
@@ -1737,6 +1759,7 @@ fn media_row(m: MediaInfo) -> MediaRow {
         width: m.width,
         height: m.height,
         duration_ms: m.duration_ms,
+        waveform: m.waveform,
     }
 }
 
@@ -1798,6 +1821,14 @@ fn data_uri(media: &OpenedMedia) -> Option<String> {
         return None;
     }
     let mime = sniff(&media.bytes, &media.mime)?;
+    // AAC is not playable everywhere the page runs (`voice`): decoded here. What does not decode
+    // (another codec in an MP4) goes as it is, for a webview that can play it.
+    if mime == "audio/mp4"
+        && let Some(wav) = crate::voice::wav_of_mp4(&media.bytes, MAX_INLINE_BYTES)
+    {
+        let body = base64::engine::general_purpose::STANDARD.encode(wav);
+        return Some(format!("data:audio/wav;base64,{body}"));
+    }
     let body = base64::engine::general_purpose::STANDARD.encode(&media.bytes);
     Some(format!("data:{mime};base64,{body}"))
 }
@@ -2400,7 +2431,16 @@ mod tests {
         assert!(
             data_uri(&opened("audio/m4a", None, m4a))
                 .unwrap()
-                .starts_with("data:audio/mp4;")
+                .starts_with("data:audio/mp4;"),
+            "an MP4 that does not decode goes as it is"
+        );
+        // A voice note as the phones send it: decoded, played as WAV everywhere.
+        let note = construct_client::voice::encode(&[0.25; 44_100], 44_100).unwrap();
+        assert!(
+            data_uri(&opened("audio/m4a", None, &note.bytes))
+                .unwrap()
+                .starts_with("data:audio/wav;base64,UklGR"),
+            "RIFF"
         );
         assert_eq!(
             data_uri(&opened("video/mp4", None, m4a)),

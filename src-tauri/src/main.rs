@@ -8,6 +8,7 @@
 mod bridge;
 mod logs;
 mod update;
+mod voice;
 
 use bridge::{Intent, ViewEvent};
 use tauri::{Manager, State, ipc::Channel};
@@ -537,6 +538,18 @@ async fn clear_logs(dir: State<'_, LogDir>) -> Result<(), String> {
     Ok(())
 }
 
+/// Start recording a voice note for `peer_id`.
+#[tauri::command]
+fn start_voice(peer_id: String, app: tauri::AppHandle) -> Result<(), String> {
+    voice::start(&app, peer_id)
+}
+
+/// End the recording: sent when `send`, else dropped.
+#[tauri::command]
+async fn stop_voice(send: bool, app: tauri::AppHandle) -> Result<(), String> {
+    voice::stop(&app, send).await
+}
+
 /// Settings → About: read the update feed now.
 #[tauri::command]
 async fn check_update(app: tauri::AppHandle) {
@@ -652,6 +665,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Intents(intents))
         .manage(update::Updates::default())
+        .manage(voice::Recording::default())
         .setup(move |app| {
             let dir = app
                 .path()
@@ -751,6 +765,8 @@ fn main() {
             check_update,
             install_update,
             open_release_page,
+            start_voice,
+            stop_voice,
         ])
         .run(tauri::generate_context!())
         .expect("the Tauri runtime failed to start");
