@@ -1,3 +1,10 @@
 [workspace]
 members = ["src-tauri"]
 resolver = "3"
+
+# rustls with a ClientHello rewriter (branch reality-0.23 of the fork, pinned), which
+# construct-client uses to send Chrome's hello to VEIL fronts (construct-docs
+# decisions/desktop-veil.md). With no rewriter set it is upstream rustls: the direct connection
+# and everything else here are unchanged. construct-client pins the same commit.
+[patch.crates-io]
+rustls = { git = "https://github.com/maxeliseyev/rustls.git", rev = "7df70d14" }
