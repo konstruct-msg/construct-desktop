@@ -33,10 +33,16 @@ jobs:
   linux:
     needs: version
     uses: ./.github/workflows/linux.yml
+    with:
+      updates: true
+    secrets: inherit
 
   windows:
     needs: version
     uses: ./.github/workflows/windows.yml
+    with:
+      updates: true
+    secrets: inherit
 
   publish:
     needs: [linux, windows]
@@ -59,8 +65,8 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           mkdir dist
-          find bundle -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) -exec cp {} dist/ \;
-          find bundle-windows -type f \( -name '*.exe' -o -name '*.msi' \) -exec cp {} dist/ \;
+          find bundle -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.AppImage.sig' \) -exec cp {} dist/ \;
+          find bundle-windows -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.sig' \) -exec cp {} dist/ \;
           (cd dist && sha256sum * > SHA256SUMS)
           cat dist/SHA256SUMS
 
@@ -91,3 +97,27 @@ jobs:
           case "$TAG" in v0.*) pre="--prerelease" ;; esac
           gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "Konstruct $TAG" \
             --notes-file notes.md --verify-tag $pre
+
+      # The feed the installed copies read once a day (src-tauri/src/update.rs): a fixed
+      # pre-release, as `releases/latest` does not see pre-releases; its `latest.json` is
+      # replaced by each release. Only the packages are signed; a feed naming a file whose
+      # signature does not check against the key in the app installs nothing.
+      - name: Update feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          one() { n=$(cd dist && ls $1); [ "$(echo "$n" | wc -l)" = 1 ] && [ -f "dist/$n.sig" ] || { echo "no single signed $1" >&2; exit 1; }; echo "$n"; }
+          appimage=$(one '*.AppImage'); nsis=$(one '*-setup.exe'); msi=$(one '*.msi')
+          entry() { jq -n --arg url "$base/$1" --rawfile sig "dist/$1.sig" '{url: $url, signature: $sig}'; }
+          jq -n --arg v "${TAG#v}" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson appimage "$(entry "$appimage")" --argjson nsis "$(entry "$nsis")" --argjson msi "$(entry "$msi")" \
+            '{version: $v, pub_date: $date, platforms: {
+               "linux-x86_64": $appimage, "linux-x86_64-appimage": $appimage,
+               "windows-x86_64": $nsis, "windows-x86_64-nsis": $nsis, "windows-x86_64-msi": $msi }}' > latest.json
+          cat latest.json
+          gh release view update-feed --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 ||
+            gh release create update-feed --repo "$GITHUB_REPOSITORY" --prerelease --target main \
+              --title "Update feed" --notes "What installed copies read to find a new version. Not a release: the packages are on the vX.Y.Z releases."
+          gh release upload update-feed latest.json --repo "$GITHUB_REPOSITORY" --clobber

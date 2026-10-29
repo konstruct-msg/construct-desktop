@@ -39,5 +39,12 @@ smoke tests as CI), checks that the tag matches the version, and publishes them 
 code-signing certificate. The notes
 list the commits of construct-client, construct-core and construct-protos the build used.
 
+**Updates.** The release also replaces `latest.json` on the fixed pre-release `update-feed`; an
+installed AppImage or Windows copy reads it at start and once a day and installs a newer version
+whose minisign signature checks against `plugins.updater.pubkey` in `tauri.conf.json`
+(`src-tauri/src/update.rs`). A `.deb` or `.rpm` copy only says a version is out. The signing key is
+the repository secret `TAURI_SIGNING_PRIVATE_KEY` (and `…_PASSWORD`); a release fails without it.
+Losing that key means no installed copy can be updated again: keep a copy off the machine.
+
 License: MPL-2.0. JetBrains Mono is OFL-1.1
 (`ui/fonts/OFL.txt`).

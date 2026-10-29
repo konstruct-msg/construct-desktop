@@ -107,6 +107,14 @@ pub enum ViewEvent {
         front: Option<String>,
         fronts: usize,
     },
+    /// Where updating stands (`update`): `state` `checking`, `current`, `available`, `installing`,
+    /// `failed`; `install` how this copy gets it: `itself`, `deb`, `rpm`, `manual`.
+    Update {
+        state: &'static str,
+        version: Option<String>,
+        install: &'static str,
+        error: Option<String>,
+    },
     /// A voucher link for another device and its end (Unix seconds); or why there is none.
     VeilVoucher {
         link: Option<String>,
@@ -411,6 +419,8 @@ pub struct ReactionRow {
 /// What the person did in the webview.
 pub enum Intent {
     Attach(Channel<ViewEvent>),
+    /// Not the person's: what the update check found (`update`), to show and keep.
+    Update(ViewEvent),
     Register(String),
     StartLink,
     CancelLink,
@@ -571,6 +581,8 @@ struct Model {
     importing: Option<std::path::PathBuf>,
     /// A transfer over the local network under way: whether this device sends.
     nearby: Option<bool>,
+    /// What the update check last found.
+    update: Option<ViewEvent>,
 }
 
 /// The app lock as this window keeps it. While `locked`, the page is sent nothing of the account
@@ -618,6 +630,7 @@ impl Lock {
                 | ViewEvent::Unlocked
                 | ViewEvent::UnlockFailed { .. }
                 | ViewEvent::LockSetting { .. }
+                | ViewEvent::Update { .. }
         )
     }
 }
@@ -780,6 +793,7 @@ pub async fn run(
         lock: Lock::default(),
         importing: None,
         nearby: None,
+        update: None,
     };
     model.screen = match construct_client::stored_session_state() {
         SessionState::Encrypted => Screen::Unlock,
@@ -844,6 +858,7 @@ fn handle_intent(
         && !matches!(
             intent,
             Intent::Attach(_)
+                | Intent::Update(_)
                 | Intent::UnlockApp(_)
                 | Intent::Focus(_)
                 | Intent::Notifications(_)
@@ -858,6 +873,10 @@ fn handle_intent(
                 let _ = channel.send(event);
             }
             *view = Some(channel);
+        }
+        Intent::Update(event) => {
+            model.update = Some(event.clone());
+            send(view, event);
         }
         Intent::Register(username) => {
             client.send(ClientCommand::Register { username });
@@ -1110,6 +1129,8 @@ fn snapshot(model: &Model) -> Vec<ViewEvent> {
             delay_secs: model.lock.delay_secs,
         });
     }
+    // Nothing of the account: shown while locked too.
+    events.extend(model.update.clone());
     if model.lock.locked {
         events.push(ViewEvent::Connection {
             connected: model.connected,
@@ -1969,6 +1990,7 @@ mod tests {
             lock: Lock::default(),
             importing: None,
             nearby: None,
+            update: None,
         }
     }
 
