@@ -23,6 +23,16 @@ on:
         default: main
   # The release workflow builds through this one, so a release is the same build CI checks.
   workflow_call:
+    inputs:
+      # A release: sign the update files with the updater key, and fail without it.
+      updates:
+        type: boolean
+        default: false
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
 
 permissions:
   contents: read
@@ -96,9 +106,19 @@ jobs:
       - name: Installers
         if: github.event_name != 'pull_request'
         working-directory: construct-desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           rm -rf target/release/bundle
-          npx --yes @tauri-apps/cli@2 build --bundles deb,rpm,appimage
+          if [ "${{ inputs.updates }}" = true ]; then
+            [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "a release needs the updater key"; exit 1; }
+            # The updater's signature beside each self-updating package (src/update.rs).
+            npx --yes @tauri-apps/cli@2 build --bundles deb,rpm,appimage \
+              --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          else
+            npx --yes @tauri-apps/cli@2 build --bundles deb,rpm,appimage
+          fi
 
       # The store key in Secret Service: the client's keyring round trip, against a real
       # gnome-keyring in a D-Bus session. Ignored in ordinary runs because it writes to the key store.
@@ -159,4 +179,5 @@ jobs:
             construct-desktop/target/release/bundle/deb/*.deb
             construct-desktop/target/release/bundle/rpm/*.rpm
             construct-desktop/target/release/bundle/appimage/*.AppImage
+            construct-desktop/target/release/bundle/appimage/*.AppImage.sig
           if-no-files-found: error

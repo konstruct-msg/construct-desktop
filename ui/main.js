@@ -62,6 +62,13 @@ const WORDS = {
     veilConnect: "Connect", veilDisconnect: "Disconnect",
     diagnostics: "Diagnostics", logsSize: "Size", saveLogs: "Save logs", clearLogs: "Clear logs",
     recentLogs: "Recent lines", logsEmpty: "Nothing written yet", logsCleared: "Logs cleared",
+    update: "Updates", updateCheck: "Check for updates", updateInstall: "Install and restart", updatePage: "Release page",
+    updateUnknown: "Checked at start and once a day.", updateChecking: "Checking…", updateCurrent: "This is the latest version.",
+    updateAvailable: "Version {version} is available.", updateInstalling: "Downloading and installing {version}…",
+    updateFailed: "Update failed: {error}",
+    updateDeb: "Installed from a .deb: download Konstruct_{version}_amd64.deb from the release page and run sudo apt install ./Konstruct_{version}_amd64.deb",
+    updateRpm: "Installed from an .rpm: download Konstruct-{version}-1.x86_64.rpm from the release page and run sudo dnf install ./Konstruct-{version}-1.x86_64.rpm",
+    updateManual: "This copy was not installed from a package: build or download the new version.",
     logsSaved: "Logs saved to Downloads: {name}. Click to show the folder; attach the file to your report.",
     diagnosticsHint: "Logs show what the app did: connections, delivery, errors. They hold no message text and no keys, and stay on this computer until you send them yourself.",
     lockHint: "Enter the code to open Konstruct.", unlock: "Unlock",
@@ -221,6 +228,13 @@ const WORDS = {
     veilConnect: "Подключиться", veilDisconnect: "Отключить",
     diagnostics: "Диагностика", logsSize: "Размер", saveLogs: "Сохранить логи", clearLogs: "Очистить логи",
     recentLogs: "Последние строки", logsEmpty: "Пока ничего не записано", logsCleared: "Логи очищены",
+    update: "Обновления", updateCheck: "Проверить обновления", updateInstall: "Установить и перезапустить", updatePage: "Страница релиза",
+    updateUnknown: "Проверяется при запуске и раз в день.", updateChecking: "Проверка…", updateCurrent: "Установлена последняя версия.",
+    updateAvailable: "Доступна версия {version}.", updateInstalling: "Загрузка и установка {version}…",
+    updateFailed: "Обновление не удалось: {error}",
+    updateDeb: "Установлено из .deb: скачайте Konstruct_{version}_amd64.deb на странице релиза и выполните sudo apt install ./Konstruct_{version}_amd64.deb",
+    updateRpm: "Установлено из .rpm: скачайте Konstruct-{version}-1.x86_64.rpm на странице релиза и выполните sudo dnf install ./Konstruct-{version}-1.x86_64.rpm",
+    updateManual: "Эта копия установлена не из пакета: соберите или скачайте новую версию.",
     logsSaved: "Логи сохранены в «Загрузки»: {name}. Нажмите, чтобы открыть папку, и приложите файл к сообщению.",
     diagnosticsHint: "В логах — что делало приложение: соединения, доставка, ошибки. Текста сообщений и ключей в них нет, и они остаются на этом компьютере, пока вы сами их не отправите.",
     lockHint: "Введите код, чтобы открыть Konstruct.", unlock: "Открыть",
@@ -1309,6 +1323,7 @@ function openSettings(pane = "profile") {
   renderConnection();
 
   renderLogs();
+  renderUpdate();
   renderRecovery();
   markTheme();
   markPrefs();
@@ -1344,6 +1359,55 @@ for (const b of document.querySelectorAll(".save-logs")) {
 
 $("clear-logs").addEventListener("click", () =>
   invoke("clear_logs").then(() => { toast(t("logsCleared")); renderLogs(); }).catch((e) => toast(String(e), true)),
+);
+
+// ── Updates ─────────────────────────────────────────────────────────────────
+// Rust checks the feed and installs; the page shows where it stands (bridge.rs `Update`).
+
+let update = null;
+let updateToldFor = null;
+
+function onUpdate(e) {
+  update = e;
+  renderUpdate();
+  // Once per version found, wherever the person is.
+  if (e.state === "available" && e.version !== updateToldFor) {
+    updateToldFor = e.version;
+    toast(t("updateAvailable", { version: e.version }), false, () => openSettings("about"));
+  }
+}
+
+function renderUpdate() {
+  const e = update ?? { state: "unknown", install: "itself" };
+  const line = {
+    unknown: () => t("updateUnknown"),
+    checking: () => t("updateChecking"),
+    current: () => t("updateCurrent"),
+    installing: () => t("updateInstalling", { version: e.version }),
+    failed: () => t("updateFailed", { error: e.error ?? "" }),
+    available: () => {
+      const how = { deb: "updateDeb", rpm: "updateRpm", manual: "updateManual" }[e.install];
+      const found = t("updateAvailable", { version: e.version });
+      return how ? `${found} ${t(how, { version: e.version })}` : found;
+    },
+  }[e.state] ?? (() => "");
+  $("update-state").textContent = line();
+  $("update-state").classList.toggle("error", e.state === "failed");
+  const available = e.state === "available";
+  $("update-install").hidden = !(available && e.install === "itself");
+  $("update-page").hidden = !(available && (e.install === "deb" || e.install === "rpm"));
+  $("update-check").disabled = e.state === "checking" || e.state === "installing";
+}
+
+$("update-check").addEventListener("click", () => {
+  onUpdate({ ...(update ?? { install: "itself" }), state: "checking" });
+  invoke("check_update").catch((err) => toast(String(err), true));
+});
+$("update-install").addEventListener("click", () =>
+  invoke("install_update").catch((err) => toast(String(err), true)),
+);
+$("update-page").addEventListener("click", () =>
+  invoke("open_release_page").catch((err) => toast(String(err), true)),
 );
 
 // ── VEIL ────────────────────────────────────────────────────────────────────
@@ -2126,6 +2190,7 @@ function onEvent(e) {
     case "media": onMedia(e); break;
     case "stickers": onStickers(e); break;
     case "veil": onVeil(e); break;
+    case "update": onUpdate(e); break;
     case "veilVoucher": onVeilVoucher(e); break;
     case "stickerImage": onStickerImage(e); break;
     case "stickerCatalog": onStickerCatalog(e); break;

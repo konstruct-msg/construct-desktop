@@ -39,5 +39,12 @@
       "icons/icon.png",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "PUBKEY-PENDING",
+      "endpoints": ["https://github.com/konstruct-msg/construct-desktop/releases/download/update-feed/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
   }
 }

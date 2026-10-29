@@ -7,16 +7,17 @@
 
 mod bridge;
 mod logs;
+mod update;
 
 use bridge::{Intent, ViewEvent};
 use tauri::{Manager, State, ipc::Channel};
 use tokio::sync::mpsc;
 use zeroize::Zeroizing;
 
-struct Intents(mpsc::UnboundedSender<Intent>);
+pub(crate) struct Intents(mpsc::UnboundedSender<Intent>);
 
 impl Intents {
-    fn send(&self, intent: Intent) {
+    pub(crate) fn send(&self, intent: Intent) {
         let _ = self.0.send(intent);
     }
 }
@@ -468,7 +469,8 @@ fn open_downloads(dir: State<Downloads>) -> Result<(), String> {
     open_folder(&dir.0)
 }
 
-fn open_folder(dir: &std::path::Path) -> Result<(), String> {
+/// A folder, or the release page: handed to the system's opener.
+fn open_folder(dir: impl AsRef<std::ffi::OsStr>) -> Result<(), String> {
     let opener = if cfg!(target_os = "macos") {
         "open"
     } else if cfg!(target_os = "windows") {
@@ -477,7 +479,7 @@ fn open_folder(dir: &std::path::Path) -> Result<(), String> {
         "xdg-open"
     };
     std::process::Command::new(opener)
-        .arg(dir)
+        .arg(dir.as_ref())
         .spawn()
         .map(drop)
         .map_err(|e| format!("{opener}: {e}"))
@@ -533,6 +535,26 @@ async fn clear_logs(dir: State<'_, LogDir>) -> Result<(), String> {
     blocking(move || logs::clear(&dir)).await?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "logs cleared");
     Ok(())
+}
+
+/// Settings → About: read the update feed now.
+#[tauri::command]
+async fn check_update(app: tauri::AppHandle) {
+    update::check(&app).await;
+}
+
+/// Install the update found and start again (a copy that replaces itself).
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    update::install(&app).await
+}
+
+/// The release page of the update found, in the browser: a `.deb` or `.rpm` copy is updated
+/// from there by the package manager. The address is this repository's, with the version only.
+#[tauri::command]
+fn open_release_page(app: tauri::AppHandle) -> Result<(), String> {
+    let page = update::release_page(&app).ok_or("no update")?;
+    open_folder(page)
 }
 
 /// File work off the window's thread.
@@ -627,7 +649,9 @@ fn main() {
     #[cfg(target_os = "macos")]
     let builder = builder.menu(tauri::menu::Menu::default);
     builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Intents(intents))
+        .manage(update::Updates::default())
         .setup(move |app| {
             let dir = app
                 .path()
@@ -652,6 +676,7 @@ fn main() {
                 downloads,
                 inbox,
             ));
+            tauri::async_runtime::spawn(update::run(app.handle().clone()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -723,6 +748,9 @@ fn main() {
             logs_recent,
             save_logs,
             clear_logs,
+            check_update,
+            install_update,
+            open_release_page,
         ])
         .run(tauri::generate_context!())
         .expect("the Tauri runtime failed to start");
