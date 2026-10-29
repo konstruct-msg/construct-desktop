@@ -57,6 +57,9 @@ const WORDS = {
     veilLinkPlaceholder: "konstruct://veil-config?d=…", veilImport: "Add",
     veilVoucher: "A link for someone else", veilVoucherHint: "For a person or device that cannot reach Konstruct: a link to one front, valid for a short time. Up to three a day.",
     veilVoucherMake: "Make a link", veilVoucherExp: "Valid until {time}.",
+    veilNoAccess: "Can't reach Konstruct?",
+    veilStartHint: "Paste a VEIL link someone whose Konstruct works made for you (Settings → VEIL → A link for someone else). Creating an account or linking this device then goes through a front, and nothing goes anywhere else.",
+    veilConnect: "Connect", veilDisconnect: "Disconnect",
     diagnostics: "Diagnostics", logsSize: "Size", saveLogs: "Save logs", clearLogs: "Clear logs",
     recentLogs: "Recent lines", logsEmpty: "Nothing written yet", logsCleared: "Logs cleared",
     logsSaved: "Logs saved to Downloads: {name}. Click to show the folder; attach the file to your report.",
@@ -213,6 +216,9 @@ const WORDS = {
     veilLinkPlaceholder: "konstruct://veil-config?d=…", veilImport: "Добавить",
     veilVoucher: "Ссылка для другого", veilVoucherHint: "Тому, кто не может подключиться к Konstruct: ссылка на один фронт, действует недолго. Не больше трёх в день.",
     veilVoucherMake: "Сделать ссылку", veilVoucherExp: "Действует до {time}.",
+    veilNoAccess: "Нет доступа к Konstruct?",
+    veilStartHint: "Вставьте ссылку VEIL, которую сделал для вас тот, у кого Konstruct работает (Настройки → VEIL → Ссылка для другого). Тогда создание аккаунта или привязка этого устройства пойдут через фронт, и больше никуда.",
+    veilConnect: "Подключиться", veilDisconnect: "Отключить",
     diagnostics: "Диагностика", logsSize: "Размер", saveLogs: "Сохранить логи", clearLogs: "Очистить логи",
     recentLogs: "Последние строки", logsEmpty: "Пока ничего не записано", logsCleared: "Логи очищены",
     logsSaved: "Логи сохранены в «Загрузки»: {name}. Нажмите, чтобы открыть папку, и приложите файл к сообщению.",
@@ -1350,6 +1356,12 @@ function onVeil(e) {
   const line = t(states[e.state] ?? "veilStateOff", { front: e.front ?? "" });
   $("veil-state").textContent = `${line} ${t("veilFronts", { n: e.fronts })}`;
   $("veil-state").classList.toggle("error", e.state === "noFront");
+  // The same, on the first screen before there is an account.
+  const start = $("veil-start-state");
+  start.hidden = !e.on;
+  start.textContent = line;
+  start.classList.toggle("error", e.state === "noFront");
+  $("veil-start-off").hidden = !e.on;
 }
 
 function onVeilVoucher(e) {
@@ -1359,6 +1371,18 @@ function onVeilVoucher(e) {
   $("veil-voucher-exp").textContent = t("veilVoucherExp", { time: clock(e.exp * 1000) });
   $("veil-voucher-out").hidden = false;
 }
+
+$("veil-start-open").addEventListener("click", () => {
+  $("veil-start").hidden = false;
+  $("veil-start-open").hidden = true;
+  $("veil-start-link").focus();
+});
+$("veil-start-connect").addEventListener("click", () => {
+  const link = $("veil-start-link").value.trim();
+  if (!link) return;
+  invoke("import_veil_link", { link }).then(() => ($("veil-start-link").value = "")).catch((e) => toast(String(e), true));
+});
+$("veil-start-off").addEventListener("click", () => invoke("set_veil", { on: false }).catch(() => {}));
 
 for (const b of $("veil-mode").querySelectorAll("[data-value]")) {
   b.addEventListener("click", () => invoke("set_veil", { on: b.dataset.value === "on" }));
