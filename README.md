@@ -33,8 +33,10 @@ Needs `construct-client`, `construct-core` and `construct-protos` checked out be
 1. A PR sets the new version in `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`.
 2. After it is merged, tag main: `git tag v<version> origin/main && git push origin v<version>`.
 
-The `release` workflow builds the packages (the same build and smoke test as CI), checks that
-the tag matches the version, and publishes them with `SHA256SUMS` as a GitHub release. The notes
+The `release` workflow builds the Linux packages and the Windows installers (the same builds and
+smoke tests as CI), checks that the tag matches the version, and publishes them with
+`SHA256SUMS` as a GitHub release. The Windows installers are unsigned until there is a
+code-signing certificate. The notes
 list the commits of construct-client, construct-core and construct-protos the build used.
 
 License: MPL-2.0. JetBrains Mono is OFL-1.1
