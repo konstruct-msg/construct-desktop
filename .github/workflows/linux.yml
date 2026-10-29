@@ -6,6 +6,10 @@
 # main branches as they are at the time of the run — so it runs without `--locked`: the sibling
 # crates' versions move with their main, and the lockfile follows them in the runner only. A
 # breaking change on a sibling's main shows here first.
+#
+# A pull request gets clippy, the tests and the program started from a debug build; the
+# installers (a release build, the slow part), the key-store check and the smoke test of the
+# installed package run on main, by hand and for a release.
 name: linux
 
 on:
@@ -69,14 +73,15 @@ jobs:
           rustup show active-toolchain || rustup toolchain install
           rustc --version
 
-      - uses: actions/cache@v4
+      # Compiled dependencies only, not this workspace's own crates; saved from main alone, so
+      # pull requests reuse it instead of each adding a copy (the repository has 10 GB).
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            construct-desktop/target
-          key: linux-cargo-${{ hashFiles('construct-desktop/Cargo.lock', 'construct-desktop/rust-toolchain.toml') }}
-          restore-keys: linux-cargo-
+          shared-key: linux
+          workspaces: |
+            construct-desktop -> target
+            construct-client -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Clippy
         working-directory: construct-desktop
@@ -89,6 +94,7 @@ jobs:
       # target/ comes back from the cache with the previous run's packages in it; without this the
       # artifact, the smoke test and a release would pick up an older version beside the new one.
       - name: Installers
+        if: github.event_name != 'pull_request'
         working-directory: construct-desktop
         run: |
           rm -rf target/release/bundle
@@ -97,6 +103,7 @@ jobs:
       # The store key in Secret Service: the client's keyring round trip, against a real
       # gnome-keyring in a D-Bus session. Ignored in ordinary runs because it writes to the key store.
       - name: Secret Service
+        if: github.event_name != 'pull_request'
         working-directory: construct-client
         run: |
           sudo apt-get install -y --no-install-recommends gnome-keyring dbus-x11
@@ -105,9 +112,25 @@ jobs:
             cargo test -p construct-client --lib -- --ignored the_os_key_store
           '
 
+      # In a pull request: the debug build starts and keeps running — a panic at startup or a
+      # webview that cannot come up ends it before the timeout.
+      - name: Smoke test (debug build)
+        if: github.event_name == 'pull_request'
+        working-directory: construct-desktop
+        run: |
+          cargo build -p construct-desktop
+          sudo apt-get install -y --no-install-recommends xvfb
+          export HOME="$(mktemp -d)" RUST_LOG=info
+          code=0
+          timeout 20 dbus-run-session -- xvfb-run -a ./target/debug/konstruct-desktop > smoke.log 2>&1 || code=$?
+          tail -n 30 smoke.log
+          if grep -qi panicked smoke.log; then exit 1; fi
+          [ "$code" = 124 ] || { echo "konstruct-desktop exited with $code before the timeout"; exit 1; }
+
       # The installed package starts and keeps running: a missing library, a panic at startup or
       # a webview that cannot come up ends it before the timeout.
       - name: Smoke test
+        if: github.event_name != 'pull_request'
         working-directory: construct-desktop
         run: |
           sudo apt-get install -y --no-install-recommends xvfb ./target/release/bundle/deb/*.deb
@@ -121,12 +144,14 @@ jobs:
       # The siblings are path dependencies on their main (see the top of this file), so the
       # commits a build used are recorded next to it; the release notes carry them.
       - name: Sibling commits
+        if: github.event_name != 'pull_request'
         run: |
           for r in construct-desktop construct-client construct-core construct-protos; do
             echo "$r $(git -C $r rev-parse HEAD)"
           done | tee construct-desktop/target/release/bundle/siblings.txt
 
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: konstruct-linux
           path: |

@@ -5,6 +5,9 @@
 #
 # The installers are not signed yet (TODO 218, stage 5: the code-signing certificate), so
 # SmartScreen warns when one is run.
+#
+# As in `linux.yml`, a pull request gets clippy, the tests and the debug build started; the
+# installers and the Credential Manager check run on main, by hand and for a release.
 name: windows
 
 on:
@@ -69,14 +72,14 @@ jobs:
           rustup show active-toolchain || rustup toolchain install
           rustc --version
 
-      - uses: actions/cache@v4
+      # As in linux.yml: compiled dependencies only, saved from main alone.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            construct-desktop/target
-          key: windows-cargo-${{ hashFiles('construct-desktop/Cargo.lock', 'construct-desktop/rust-toolchain.toml') }}
-          restore-keys: windows-cargo-
+          shared-key: windows
+          workspaces: |
+            construct-desktop -> target
+            construct-client -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Clippy
         working-directory: construct-desktop
@@ -88,6 +91,7 @@ jobs:
 
       # As on Linux: the cached target/ holds the previous run's installers.
       - name: Installers
+        if: github.event_name != 'pull_request'
         working-directory: construct-desktop
         run: |
           rm -rf target/release/bundle
@@ -96,17 +100,23 @@ jobs:
       # The store key in Credential Manager: the client's keyring round trip, against the
       # runner's real one. Ignored in ordinary runs because it writes to the key store.
       - name: Credential Manager
+        if: github.event_name != 'pull_request'
         working-directory: construct-client
         run: cargo test -p construct-client --lib -- --ignored the_os_key_store
 
-      # The built program starts and keeps running: a missing DLL, a panic at startup or a
+      # The program starts and keeps running (the release build, or in a pull request the debug one): a missing DLL, a panic at startup or a
       # WebView2 that cannot come up ends it before the timeout. It finds no account on a fresh
       # runner, so it waits on the first screen.
       - name: Smoke test
         working-directory: construct-desktop
         run: |
           export RUST_LOG=info
-          ./target/release/konstruct-desktop.exe > smoke.log 2>&1 &
+          exe=./target/release/konstruct-desktop.exe
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            cargo build -p construct-desktop
+            exe=./target/debug/konstruct-desktop.exe
+          fi
+          "$exe" > smoke.log 2>&1 &
           pid=$!
           sleep 20
           alive=0
@@ -118,12 +128,14 @@ jobs:
           [ "$alive" = 1 ] || { echo "konstruct-desktop.exe exited before the timeout"; exit 1; }
 
       - name: Sibling commits
+        if: github.event_name != 'pull_request'
         run: |
           for r in construct-desktop construct-client construct-core construct-protos; do
             echo "$r $(git -C $r rev-parse HEAD)"
           done | tee construct-desktop/target/release/bundle/siblings.txt
 
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: konstruct-windows
           path: |
