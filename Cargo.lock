@@ -872,7 +872,7 @@ dependencies = [
 
 [[package]]
 name = "construct-core"
-version = "0.59.0"
+version = "0.60.0"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -905,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "construct-desktop"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "base64 0.22.1",
  "construct-client",
