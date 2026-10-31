@@ -105,6 +105,13 @@
         </button>
       </header>
       <input id="chat-search" class="search" type="search" spellcheck="false" data-tp="search">
+      <div id="gap" class="gap-notice" role="status" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4zM12 8v4M12 14.5v.5"/></svg>
+        <div class="lines"><span class="title" data-t="gapTitle"></span><span id="gap-text" class="body"></span></div>
+        <button type="button" class="icon" id="gap-close" data-tl="close">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
       <ul id="chat-list" class="chat-list" role="listbox"></ul>
       <footer class="sidebar-foot">
         <span id="connection" class="dot" data-tl="offline"></span>
