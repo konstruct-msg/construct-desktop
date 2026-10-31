@@ -127,6 +127,9 @@ const WORDS = {
     unvouchedToast: "{name} has a device none of their other devices confirmed. Open the chat to verify.",
     unvouchedBanner: "{name} has a device none of their other devices confirmed. It may be theirs, or someone else's.",
     compareSafety: "Compare safety numbers", unvouchedTitle: "Unconfirmed device",
+    gapTitle: "Some messages may not have arrived",
+    gapBody: "Messages sent to you between {from} and {until} were removed from the server before this device collected them. The server keeps undelivered messages for a limited time.",
+    gapBodyOpen: "Messages sent to you since {from} were removed from the server before this device collected them. The server keeps undelivered messages for a limited time.",
     reply: "Reply", edit: "Edit", copy: "Copy", deleteForMe: "Delete for me",
     confirmDeleteMessage: "Delete here? Click again", edited: "edited", replyingTo: "Reply to {name}",
     editing: "Editing", cancel: "Cancel", you: "you", messageActions: "Message actions",
@@ -294,6 +297,9 @@ const WORDS = {
     unvouchedToast: "У {name} появилось устройство, которое не подтвердило ни одно другое устройство этого аккаунта. Откройте чат, чтобы проверить.",
     unvouchedBanner: "У {name} появилось устройство, которое не подтвердило ни одно другое устройство этого аккаунта. Возможно, оно не принадлежит собеседнику.",
     compareSafety: "Сравнить защитные числа", unvouchedTitle: "Неподтверждённое устройство",
+    gapTitle: "Часть сообщений могла не дойти",
+    gapBody: "Сообщения, отправленные вам с {from} по {until}, удалены с сервера раньше, чем это устройство их забрало. Сервер хранит недоставленные сообщения ограниченное время.",
+    gapBodyOpen: "Сообщения, отправленные вам с {from}, удалены с сервера раньше, чем это устройство их забрало. Сервер хранит недоставленные сообщения ограниченное время.",
     reply: "Ответить", edit: "Изменить", copy: "Копировать", deleteForMe: "Удалить у себя",
     confirmDeleteMessage: "Удалить здесь? Нажмите ещё раз", edited: "изменено",
     replyingTo: "Ответ {name}", editing: "Редактирование", cancel: "Отмена", you: "вам",
@@ -567,6 +573,18 @@ function renderAlarm() {
   if (row?.unvouched) $("alarm-text").textContent = t("unvouchedBanner", { name: row.name });
 }
 $("alarm-compare").addEventListener("click", () => openInfo());
+
+/** Messages the server removed before this device collected them: one notice above the chat
+ *  list until closed (decisions/mailbox-gap-is-reported.md). Whose they were nobody knows. */
+function onMailboxGap(gap) {
+  $("gap").hidden = !gap;
+  if (!gap) return;
+  const when = (ms) => new Date(ms).toLocaleString(LANG, { dateStyle: "medium", timeStyle: "short" });
+  $("gap-text").textContent = gap.until == null
+    ? t("gapBodyOpen", { from: when(gap.from) })
+    : t("gapBody", { from: when(gap.from), until: when(gap.until) });
+}
+$("gap-close").addEventListener("click", () => invoke("close_mailbox_gap"));
 
 function chatName(peerId) {
   return state.chats.find((c) => c.peerId === peerId)?.name ?? `${peerId.slice(0, 8)}…`;
@@ -2431,6 +2449,7 @@ function onEvent(e) {
       break;
     case "unvouched": toast(t("unvouchedToast", { name: chatName(e.peerId) }), true); break;
     case "recovery": onRecovery(e.state); break;
+    case "mailboxGap": onMailboxGap(e.gap); break;
     case "recoveryPhrase": showWords(e.words); break;
     case "recoveryFailed": onRecoveryFailed(e.reason); break;
     case "notice": toast(e.text, e.error); break;

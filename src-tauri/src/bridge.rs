@@ -45,6 +45,11 @@ pub enum ViewEvent {
     Recovery {
         state: RecoveryView,
     },
+    /// Messages the server removed before this device collected them: one notice above the
+    /// chat list until closed; `None` hides it.
+    MailboxGap {
+        gap: Option<GapRow>,
+    },
     /// The phrase, shown because the person asked to make its copy. The window drops it when the
     /// dialog closes; the copy is checked by the client.
     RecoveryPhrase {
@@ -256,6 +261,24 @@ pub enum ViewEvent {
         text: String,
         error: bool,
     },
+}
+
+/// When the messages that may not have arrived were sent: Unix milliseconds; `until` is absent
+/// when the mailbox held nothing to resume from ("since …").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GapRow {
+    pub from: i64,
+    pub until: Option<i64>,
+}
+
+impl From<construct_client::mailbox_gap::Interval> for GapRow {
+    fn from(gap: construct_client::mailbox_gap::Interval) -> Self {
+        Self {
+            from: gap.from_ms,
+            until: gap.until_ms,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -560,6 +583,7 @@ pub enum Intent {
     },
     ClearMediaCache,
     SetMediaPrefs(construct_client::local_store::MediaPrefs),
+    CloseMailboxGap,
 }
 
 const REGISTRATION_STEPS: &[&str] = &[
@@ -581,6 +605,8 @@ struct Model {
     connected: bool,
     link_code: Option<String>,
     recovery: RecoveryView,
+    /// The notice of messages the server removed undelivered, while it is open.
+    gap: Option<GapRow>,
     /// Our account, to tell our reactions from others'.
     me: String,
     /// Where saved files go.
@@ -801,6 +827,7 @@ pub async fn run(
         connected: false,
         link_code: None,
         recovery: RecoveryView::Unknown,
+        gap: None,
         me: String::new(),
         downloads,
         saving: Default::default(),
@@ -1138,6 +1165,7 @@ fn handle_intent(
         }
         Intent::ClearMediaCache => client.send(ClientCommand::ClearMediaCache),
         Intent::SetMediaPrefs(prefs) => client.send(ClientCommand::SetMediaPrefs(prefs)),
+        Intent::CloseMailboxGap => client.send(ClientCommand::CloseMailboxGap),
     }
 }
 
@@ -1172,6 +1200,7 @@ fn snapshot(model: &Model) -> Vec<ViewEvent> {
     events.push(ViewEvent::Recovery {
         state: model.recovery,
     });
+    events.push(ViewEvent::MailboxGap { gap: model.gap });
     for (peer_id, url) in &model.avatars {
         events.push(ViewEvent::Avatar {
             peer_id: peer_id.clone(),
@@ -1420,9 +1449,11 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             model.account = None;
             model.link_code = None;
             model.recovery = RecoveryView::Unknown;
+            model.gap = None;
             vec![
                 screen(model, Screen::Onboarding),
                 ViewEvent::Chats { chats: Vec::new() },
+                ViewEvent::MailboxGap { gap: None },
             ]
         }
         ClientEvent::Notice(text) => vec![notice(text, false)],
@@ -1614,6 +1645,10 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             vec![ViewEvent::Recovery {
                 state: model.recovery,
             }]
+        }
+        ClientEvent::MailboxGap(gap) => {
+            model.gap = gap.map(GapRow::from);
+            vec![ViewEvent::MailboxGap { gap: model.gap }]
         }
         ClientEvent::RecoveryPhrase(Ok(phrase)) => vec![ViewEvent::RecoveryPhrase {
             words: phrase.split_whitespace().map(String::from).collect(),
@@ -2012,6 +2047,7 @@ mod tests {
             connected: true,
             link_code: None,
             recovery: RecoveryView::Unknown,
+            gap: None,
             me: "me".into(),
             downloads: std::env::temp_dir(),
             saving: Default::default(),
@@ -2328,6 +2364,56 @@ mod tests {
             !replay
                 .iter()
                 .any(|e| matches!(e, ViewEvent::RecoveryPhrase { .. }))
+        );
+    }
+
+    /// The notice is the account's: a reloaded page gets it back, a locked window does not,
+    /// and signing out takes it away.
+    #[test]
+    fn the_mailbox_gap_notice_is_redrawn_hidden_while_locked_and_gone_after_logout() {
+        use construct_client::mailbox_gap::Interval;
+        let mut m = model();
+        let gap = Interval {
+            from_ms: 1_000,
+            until_ms: None,
+        };
+        let out = on_client_event(ClientEvent::MailboxGap(Some(gap)), &mut m, "s");
+        let shown = Some(GapRow {
+            from: 1_000,
+            until: None,
+        });
+        assert!(matches!(&out[..], [ViewEvent::MailboxGap { gap }] if *gap == shown));
+        assert_eq!(
+            serde_json::to_value(&out[0]).unwrap(),
+            serde_json::json!({ "type": "mailboxGap", "gap": { "from": 1000, "until": null } })
+        );
+        assert!(
+            snapshot(&m)
+                .iter()
+                .any(|e| matches!(e, ViewEvent::MailboxGap { gap } if *gap == shown))
+        );
+
+        m.lock.locked = true;
+        assert!(
+            visible(&m, out).is_empty(),
+            "nothing of the account while locked"
+        );
+        assert!(
+            !snapshot(&m)
+                .iter()
+                .any(|e| matches!(e, ViewEvent::MailboxGap { .. }))
+        );
+        m.lock.locked = false;
+
+        let out = on_client_event(ClientEvent::LoggedOut, &mut m, "s");
+        assert!(
+            out.iter()
+                .any(|e| matches!(e, ViewEvent::MailboxGap { gap: None }))
+        );
+        assert!(
+            snapshot(&m)
+                .iter()
+                .any(|e| matches!(e, ViewEvent::MailboxGap { gap: None }))
         );
     }
 

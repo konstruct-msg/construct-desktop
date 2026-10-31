@@ -415,6 +415,12 @@ fn clear_media_cache(intents: State<Intents>) {
     intents.send(Intent::ClearMediaCache);
 }
 
+/// The person closed the notice of messages the server removed undelivered.
+#[tauri::command]
+fn close_mailbox_gap(intents: State<Intents>) {
+    intents.send(Intent::CloseMailboxGap);
+}
+
 /// How attachments are fetched and kept: `never`, `small` or `always`; a limit in bytes and an
 /// age in days, absent for none.
 #[tauri::command]
@@ -753,6 +759,7 @@ fn main() {
             approve_device,
             delete_account,
             clear_media_cache,
+            close_mailbox_gap,
             set_media_prefs,
             reveal_recovery_phrase,
             confirm_recovery_copy,
