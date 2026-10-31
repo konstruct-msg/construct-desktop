@@ -236,6 +236,13 @@ fn set_alias(peer_id: String, alias: String, intents: State<Intents>) {
     intents.send(Intent::SetAlias { peer_id, alias });
 }
 
+/// Block or unblock a contact: what they send is dropped, and the account's key they hold is
+/// retired on a block.
+#[tauri::command]
+fn set_blocked(peer_id: String, blocked: bool, intents: State<Intents>) {
+    intents.send(Intent::SetBlocked { peer_id, blocked });
+}
+
 #[tauri::command]
 fn rename_device(name: String, intents: State<Intents>) {
     intents.send(Intent::RenameDevice(name));
@@ -760,6 +767,7 @@ fn main() {
             delete_account,
             clear_media_cache,
             close_mailbox_gap,
+            set_blocked,
             set_media_prefs,
             reveal_recovery_phrase,
             confirm_recovery_copy,
