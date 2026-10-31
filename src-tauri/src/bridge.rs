@@ -328,6 +328,8 @@ pub struct ChatRow {
     pub sharing: bool,
     /// The name we gave them ourselves.
     pub alias: Option<String>,
+    /// We blocked them: what they send is not shown (the client drops it).
+    pub blocked: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -513,6 +515,10 @@ pub enum Intent {
     SetAlias {
         peer_id: String,
         alias: Option<String>,
+    },
+    SetBlocked {
+        peer_id: String,
+        blocked: bool,
     },
     RenameDevice(String),
     /// VEIL `off`, `auto` or `on`.
@@ -798,6 +804,7 @@ impl Model {
             unvouched: false,
             sharing: false,
             alias: None,
+            blocked: false,
         });
         self.chats.last_mut().expect("just pushed")
     }
@@ -1100,6 +1107,10 @@ fn handle_intent(
             contact_id: peer_id,
             alias,
         }),
+        Intent::SetBlocked { peer_id, blocked } => client.send(ClientCommand::SetBlocked {
+            contact_id: peer_id,
+            blocked,
+        }),
         Intent::RenameDevice(name) => client.send(ClientCommand::RenameDevice(name)),
         Intent::SetVeil(mode) => client.send(ClientCommand::SetVeilMode(match mode.as_str() {
             "on" => VeilMode::On,
@@ -1245,6 +1256,7 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
                 chat.name = contact.display_name;
                 chat.sharing = contact.sharing;
                 chat.alias = contact.alias;
+                chat.blocked = contact.blocked;
                 if let Some(url) = contact.avatar.as_deref().and_then(avatar_uri) {
                     model.avatars.insert(contact.user_id.clone(), url.clone());
                     avatars.push(ViewEvent::Avatar {
@@ -1300,6 +1312,7 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
                     unvouched: false,
                     sharing: false,
                     alias: None,
+                    blocked: false,
                 })
                 .collect(),
         }],
@@ -1704,6 +1717,7 @@ fn on_bridge_event(event: BridgeEvent, model: &mut Model) -> Vec<ViewEvent> {
             chat.name = contact.display_name;
             chat.sharing = contact.sharing;
             chat.alias = contact.alias;
+            chat.blocked = contact.blocked;
             let url = contact.avatar.as_deref().and_then(avatar_uri);
             match &url {
                 Some(url) => model.avatars.insert(contact.user_id.clone(), url.clone()),
@@ -2414,6 +2428,49 @@ mod tests {
             snapshot(&m)
                 .iter()
                 .any(|e| matches!(e, ViewEvent::MailboxGap { gap: None }))
+        );
+    }
+
+    /// A block reaches the page on the chat row — at the start, on a change, and in what a
+    /// reloaded page is redrawn from — and lifting it takes it off again.
+    #[test]
+    fn a_blocked_contact_is_marked_on_the_chat_row() {
+        use construct_client::local_store::StoredContact;
+        let bob = |blocked| StoredContact {
+            user_id: "bob".into(),
+            display_name: "Bob".into(),
+            blocked,
+            ..Default::default()
+        };
+        let mut m = model();
+        on_client_event(ClientEvent::Started(vec![bob(true)]), &mut m, "s");
+        assert!(m.sorted_chats()[0].blocked, "blocked at the start");
+
+        let out = on_client_event(
+            ClientEvent::Bridge(BridgeEvent::ContactUpdated {
+                contact: bob(false),
+            }),
+            &mut m,
+            "s",
+        );
+        assert!(
+            matches!(&out[0], ViewEvent::Chats { chats } if !chats[0].blocked),
+            "unblocked, and the page is told"
+        );
+        let out = on_client_event(
+            ClientEvent::Bridge(BridgeEvent::ContactUpdated { contact: bob(true) }),
+            &mut m,
+            "s",
+        );
+        assert!(matches!(&out[0], ViewEvent::Chats { chats } if chats[0].blocked));
+        assert!(
+            snapshot(&m).iter().any(
+                |e| matches!(e, ViewEvent::Chats { chats } if chats.iter().any(|c| c.blocked))
+            )
+        );
+        assert_eq!(
+            serde_json::to_value(&m.sorted_chats()[0]).unwrap()["blocked"],
+            serde_json::json!(true)
         );
     }
 

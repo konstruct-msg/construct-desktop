@@ -127,6 +127,10 @@ const WORDS = {
     unvouchedToast: "{name} has a device none of their other devices confirmed. Open the chat to verify.",
     unvouchedBanner: "{name} has a device none of their other devices confirmed. It may be theirs, or someone else's.",
     compareSafety: "Compare safety numbers", unvouchedTitle: "Unconfirmed device",
+    blockUser: "Block user", unblockUser: "Unblock user",
+    confirmBlock: "Block? Click again", blockedBadge: "Blocked",
+    blockHint: "What {name} sends is not shown and gets no receipt; they are not told. Messages you write them still go out.",
+    blockedBanner: "You blocked {name}. What they send is not shown.",
     gapTitle: "Some messages may not have arrived",
     gapBody: "Messages sent to you between {from} and {until} were removed from the server before this device collected them. The server keeps undelivered messages for a limited time.",
     gapBodyOpen: "Messages sent to you since {from} were removed from the server before this device collected them. The server keeps undelivered messages for a limited time.",
@@ -297,6 +301,10 @@ const WORDS = {
     unvouchedToast: "У {name} появилось устройство, которое не подтвердило ни одно другое устройство этого аккаунта. Откройте чат, чтобы проверить.",
     unvouchedBanner: "У {name} появилось устройство, которое не подтвердило ни одно другое устройство этого аккаунта. Возможно, оно не принадлежит собеседнику.",
     compareSafety: "Сравнить защитные числа", unvouchedTitle: "Неподтверждённое устройство",
+    blockUser: "Заблокировать пользователя", unblockUser: "Разблокировать пользователя",
+    confirmBlock: "Заблокировать? Нажмите ещё раз", blockedBadge: "Заблокирован",
+    blockHint: "Что присылает {name}, не показывается и не подтверждается; их об этом не уведомляют. Ваши сообщения им по-прежнему уходят.",
+    blockedBanner: "Вы заблокировали {name}. То, что они присылают, не показывается.",
     gapTitle: "Часть сообщений могла не дойти",
     gapBody: "Сообщения, отправленные вам с {from} по {until}, удалены с сервера раньше, чем это устройство их забрало. Сервер хранит недоставленные сообщения ограниченное время.",
     gapBodyOpen: "Сообщения, отправленные вам с {from}, удалены с сервера раньше, чем это устройство их забрало. Сервер хранит недоставленные сообщения ограниченное время.",
@@ -550,6 +558,11 @@ function renderChats() {
         warn.title = t("unvouchedTitle");
         top.append(warn);
       }
+      if (chat.blocked) {
+        const mark = el("span", "blocked-mark", "⊘");
+        mark.title = t("blockedBadge");
+        top.append(mark);
+      }
       top.append(el("span", "time", rowTime(chat.time)));
       const bottom = el("div", "line");
       bottom.append(el("span", "preview", chat.preview));
@@ -569,10 +582,13 @@ function renderAlarm() {
   const box = $("transcript");
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 8;
   $("alarm").hidden = !row?.unvouched;
+  $("blocked-note").hidden = !row?.blocked;
   if (atBottom) box.scrollTop = box.scrollHeight;
   if (row?.unvouched) $("alarm-text").textContent = t("unvouchedBanner", { name: row.name });
+  if (row?.blocked) $("blocked-text").textContent = t("blockedBanner", { name: row.name });
 }
 $("alarm-compare").addEventListener("click", () => openInfo());
+$("blocked-unblock").addEventListener("click", () => invoke("set_blocked", { peerId: state.open, blocked: false }));
 
 /** Messages the server removed before this device collected them: one notice above the chat
  *  list until closed (decisions/mailbox-gap-is-reported.md). Whose they were nobody knows. */
@@ -1314,8 +1330,21 @@ function openInfo() {
   $("alias-input").placeholder = t("aliasPlaceholder");
   $("safety").replaceChildren();
   invoke("safety_number", { peerId: peer });
+  syncInfoBlock();
   $("dlg-info").showModal();
 }
+/** The block button and its hint, as the open contact stands. */
+function syncInfoBlock() {
+  const chat = state.chats.find((c) => c.peerId === state.open);
+  $("info-block").textContent = t(chat?.blocked ? "unblockUser" : "blockUser");
+  $("info-block-hint").textContent = chat?.blocked ? "" : t("blockHint", { name: chatName(state.open) });
+}
+$("info-block").addEventListener("click", (ev) => {
+  const chat = state.chats.find((c) => c.peerId === state.open);
+  if (!chat) return;
+  if (chat.blocked) invoke("set_blocked", { peerId: chat.peerId, blocked: false });
+  else confirmTwice(ev.currentTarget, "confirmBlock", () => invoke("set_blocked", { peerId: chat.peerId, blocked: true }));
+});
 $("info-delete").addEventListener("click", (ev) =>
   confirmTwice(ev.currentTarget, "confirmDelete", () => {
     invoke("delete_contact", { peerId: state.open });
@@ -2361,7 +2390,10 @@ function onEvent(e) {
       renderChats();
       if (state.open) {
         $("chat-name").textContent = chatName(state.open);
-        if ($("dlg-info").open) $("info-name").textContent = chatName(state.open);
+        if ($("dlg-info").open) {
+          $("info-name").textContent = chatName(state.open);
+          syncInfoBlock();
+        }
         renderAlarm();
       }
       break;

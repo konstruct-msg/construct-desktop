@@ -138,6 +138,10 @@
           <span id="alarm-text"></span>
           <button type="button" class="link" id="alarm-compare" data-t="compareSafety"></button>
         </div>
+        <div id="blocked-note" class="note" hidden>
+          <span id="blocked-text"></span>
+          <button type="button" class="link" id="blocked-unblock" data-t="unblockUser"></button>
+        </div>
         <div id="transcript" class="transcript" tabindex="-1"></div>
         <div id="compose-bar" class="compose-bar" hidden>
           <div class="compose-what"><span id="compose-label" class="label"></span><span id="compose-text" class="text"></span></div>
@@ -226,6 +230,10 @@
     <h3 class="section" data-t="safetyNumbers"></h3>
     <p class="small" id="info-hint"></p>
     <div id="safety" class="safety mono"></div>
+    <div class="row">
+      <button type="button" class="danger-link" id="info-block"></button>
+    </div>
+    <p class="small dim" id="info-block-hint"></p>
     <div class="row end">
       <button type="button" class="danger-link" id="info-delete" data-t="deleteChat"></button>
       <span class="spacer"></span>
