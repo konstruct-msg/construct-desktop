@@ -1762,6 +1762,12 @@ fn on_bridge_event(event: BridgeEvent, model: &mut Model) -> Vec<ViewEvent> {
                 },
             ]
         }
+        // The call screen is stage C; until then the webview draws no calls and this event only
+        // reaches the log.
+        BridgeEvent::CallState { call } => {
+            tracing::debug!(?call, "call state changed");
+            Vec::new()
+        }
     }
 }
 
