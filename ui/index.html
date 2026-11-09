@@ -115,6 +115,7 @@
       <ul id="chat-list" class="chat-list" role="listbox"></ul>
       <footer class="sidebar-foot">
         <span id="connection" class="dot" data-tl="offline"></span>
+        <button type="button" class="link small" id="open-calls" data-t="calls"></button>
         <button type="button" class="link small" id="open-settings" data-t="settings"></button>
       </footer>
     </aside>
@@ -130,6 +131,9 @@
           <span id="chat-avatar"></span>
           <span id="chat-name" class="headline"></span>
           <span class="spacer"></span>
+          <button type="button" class="icon" id="chat-call" data-tl="call">
+            <svg viewBox="0 0 24 24"><path d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.2.4 2.4.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.4c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.3 0 .7-.2 1l-2.2 2.2z"/></svg>
+          </button>
           <button type="button" class="icon" id="chat-info" data-tl="profile">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>
           </button>
@@ -541,6 +545,33 @@
       <button type="button" class="secondary" id="delete-cancel" data-t="cancel"></button>
       <button type="button" class="danger-button" id="delete-go" data-t="deleteAccount"></button>
     </div>
+  </dialog>
+
+  <!-- The call: incoming panel, in progress, and how it ended -->
+  <div id="call-overlay" class="call-overlay" hidden>
+    <div class="call-card" role="dialog" aria-label="call">
+      <span id="call-avatar" class="call-avatar"></span>
+      <div id="call-name" class="call-name"></div>
+      <div id="call-status" class="call-status"></div>
+      <div id="call-detail" class="call-detail" hidden></div>
+      <div id="call-controls" class="call-controls"></div>
+      <div class="call-footer">
+        <svg viewBox="0 0 24 24"><path d="M7 11V7a5 5 0 0 1 10 0v4M5 11h14v9H5z"/></svg>
+        <span data-t="encryptedViaRelay"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Calls: recent, call back, delete -->
+  <dialog id="dlg-calls" class="sheet calls">
+    <div class="row">
+      <h2 class="headline" data-t="calls"></h2>
+      <span class="spacer"></span>
+      <button type="button" class="link" id="calls-clear" data-t="clear" hidden></button>
+    </div>
+    <ul id="calls-list" class="calls-list"></ul>
+    <p id="calls-empty" class="dim" data-t="callsEmpty" hidden></p>
+    <div class="row end"><button type="button" class="secondary" data-close data-t="close"></button></div>
   </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>
