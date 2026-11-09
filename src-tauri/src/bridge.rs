@@ -261,6 +261,15 @@ pub enum ViewEvent {
         text: String,
         error: bool,
     },
+    /// The held call, or `None` when it ended and was dismissed. The page ticks the timer from
+    /// `connectedAtMs`.
+    CallState {
+        call: Option<CallView>,
+    },
+    /// The call log, newest first.
+    CallHistory {
+        calls: Vec<CallRow>,
+    },
 }
 
 /// When the messages that may not have arrived were sent: Unix milliseconds; `until` is absent
@@ -270,6 +279,36 @@ pub enum ViewEvent {
 pub struct GapRow {
     pub from: i64,
     pub until: Option<i64>,
+}
+
+/// The call as the page draws it. `phase` is `incoming`, `calling`, `ringing`, `connecting`,
+/// `live` or `over`; `outcome` names how it ended when `over`. `connectedAtMs` (Unix ms) is when
+/// it went live — the page ticks the timer from it, it does not re-derive it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallView {
+    pub call_id: String,
+    pub peer_id: String,
+    pub peer_name: String,
+    pub direction: &'static str,
+    pub phase: &'static str,
+    pub outcome: Option<&'static str>,
+    pub answered_elsewhere: bool,
+    pub connected_at_ms: Option<i64>,
+    pub call_type: &'static str,
+}
+
+/// One row of the call log.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallRow {
+    pub id: String,
+    pub peer_id: String,
+    pub peer_name: String,
+    pub direction: &'static str,
+    pub status: &'static str,
+    pub started_at_ms: Option<i64>,
+    pub duration_seconds: i32,
 }
 
 impl From<construct_client::mailbox_gap::Interval> for GapRow {
@@ -590,6 +629,17 @@ pub enum Intent {
     ClearMediaCache,
     SetMediaPrefs(construct_client::local_store::MediaPrefs),
     CloseMailboxGap,
+    /// Begin an audio call to `peer_id`.
+    Call(String),
+    AnswerCall,
+    DeclineCall,
+    EndCall,
+    /// The person closed the ended call's outcome.
+    DismissCall,
+    /// Read the call log; `ViewEvent::CallHistory` follows.
+    LoadCallHistory,
+    DeleteCall(String),
+    ClearCalls,
 }
 
 const REGISTRATION_STEPS: &[&str] = &[
@@ -1177,6 +1227,16 @@ fn handle_intent(
         Intent::ClearMediaCache => client.send(ClientCommand::ClearMediaCache),
         Intent::SetMediaPrefs(prefs) => client.send(ClientCommand::SetMediaPrefs(prefs)),
         Intent::CloseMailboxGap => client.send(ClientCommand::CloseMailboxGap),
+        Intent::Call(peer_id) => client.send(ClientCommand::StartCall {
+            contact_id: peer_id,
+        }),
+        Intent::AnswerCall => client.send(ClientCommand::AcceptCall),
+        Intent::DeclineCall => client.send(ClientCommand::DeclineCall),
+        Intent::EndCall => client.send(ClientCommand::EndCall),
+        Intent::DismissCall => client.send(ClientCommand::DismissCall),
+        Intent::LoadCallHistory => client.send(ClientCommand::LoadCallHistory),
+        Intent::DeleteCall(id) => client.send(ClientCommand::DeleteCall { id }),
+        Intent::ClearCalls => client.send(ClientCommand::ClearCalls),
     }
 }
 
@@ -1669,6 +1729,71 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
         ClientEvent::RecoveryPhrase(Err(reason)) | ClientEvent::RecoveryFailed(reason) => {
             vec![ViewEvent::RecoveryFailed { reason }]
         }
+        ClientEvent::CallHistory(calls) => vec![ViewEvent::CallHistory {
+            calls: calls.into_iter().map(call_row).collect(),
+        }],
+    }
+}
+
+fn call_row(record: construct_client::calls::HistoryRow) -> CallRow {
+    CallRow {
+        id: record.id,
+        peer_id: record.peer_user_id,
+        peer_name: record.peer_name,
+        direction: record.direction,
+        status: record.status,
+        started_at_ms: record.started_at,
+        duration_seconds: record.duration_seconds,
+    }
+}
+
+fn call_view(call: &construct_client::calls::CallState, model: &Model) -> CallView {
+    use construct_client::calls::{Direction, Outcome, Phase};
+    let (phase, outcome, answered_elsewhere) = match &call.phase {
+        Phase::Incoming => ("incoming", None, false),
+        Phase::Calling => ("calling", None, false),
+        Phase::Ringing => ("ringing", None, false),
+        Phase::Connecting => ("connecting", None, false),
+        Phase::Live => ("live", None, false),
+        Phase::Over(ended) => (
+            "over",
+            Some(outcome_str(ended)),
+            matches!(ended, Outcome::AnsweredElsewhere),
+        ),
+    };
+    CallView {
+        call_id: call.call_id.clone(),
+        peer_id: call.peer_id.clone(),
+        peer_name: model
+            .chats
+            .iter()
+            .find(|c| c.peer_id == call.peer_id)
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| construct_client::names::generated(&call.peer_id)),
+        direction: match call.direction {
+            Direction::Outgoing => "outgoing",
+            Direction::Incoming => "incoming",
+        },
+        phase,
+        outcome,
+        answered_elsewhere,
+        connected_at_ms: call.connected_at_ms,
+        call_type: match call.call_type {
+            construct_client::calls::CallType::Audio => "audio",
+            _ => "video",
+        },
+    }
+}
+
+fn outcome_str(outcome: &construct_client::calls::Outcome) -> &'static str {
+    use construct_client::calls::Outcome;
+    match outcome {
+        Outcome::Ended => "ended",
+        Outcome::Declined => "declined",
+        Outcome::Busy => "busy",
+        Outcome::NoAnswer => "noAnswer",
+        Outcome::Failed => "failed",
+        Outcome::AnsweredElsewhere => "answeredElsewhere",
     }
 }
 
@@ -1762,11 +1887,10 @@ fn on_bridge_event(event: BridgeEvent, model: &mut Model) -> Vec<ViewEvent> {
                 },
             ]
         }
-        // The call screen is stage C; until then the webview draws no calls and this event only
-        // reaches the log.
         BridgeEvent::CallState { call } => {
-            tracing::debug!(?call, "call state changed");
-            Vec::new()
+            vec![ViewEvent::CallState {
+                call: call.map(|call| call_view(&call, model)),
+            }]
         }
     }
 }
