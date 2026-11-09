@@ -428,6 +428,49 @@ fn close_mailbox_gap(intents: State<Intents>) {
     intents.send(Intent::CloseMailboxGap);
 }
 
+/// Begin an audio call to `peer_id`.
+#[tauri::command]
+fn call(peer_id: String, intents: State<Intents>) {
+    intents.send(Intent::Call(peer_id));
+}
+
+#[tauri::command]
+fn answer_call(intents: State<Intents>) {
+    intents.send(Intent::AnswerCall);
+}
+
+#[tauri::command]
+fn decline_call(intents: State<Intents>) {
+    intents.send(Intent::DeclineCall);
+}
+
+#[tauri::command]
+fn end_call(intents: State<Intents>) {
+    intents.send(Intent::EndCall);
+}
+
+/// The person closed the ended call's outcome.
+#[tauri::command]
+fn dismiss_call(intents: State<Intents>) {
+    intents.send(Intent::DismissCall);
+}
+
+/// Read the call log; `ViewEvent::CallHistory` follows.
+#[tauri::command]
+fn call_history(intents: State<Intents>) {
+    intents.send(Intent::LoadCallHistory);
+}
+
+#[tauri::command]
+fn delete_call(id: String, intents: State<Intents>) {
+    intents.send(Intent::DeleteCall(id));
+}
+
+#[tauri::command]
+fn clear_calls(intents: State<Intents>) {
+    intents.send(Intent::ClearCalls);
+}
+
 /// How attachments are fetched and kept: `never`, `small` or `always`; a limit in bytes and an
 /// age in days, absent for none.
 #[tauri::command]
@@ -767,6 +810,14 @@ fn main() {
             delete_account,
             clear_media_cache,
             close_mailbox_gap,
+            call,
+            answer_call,
+            decline_call,
+            end_call,
+            dismiss_call,
+            call_history,
+            delete_call,
+            clear_calls,
             set_blocked,
             set_media_prefs,
             reveal_recovery_phrase,

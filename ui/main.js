@@ -184,6 +184,17 @@ const WORDS = {
     platform_ios: "iPhone", platform_android: "Android", platform_desktop: "Computer",
     platform_web: "Web", platform_bot: "Bot", unnamedDevice: "Not named yet",
     aliasPlaceholder: "Your name for them", aliasHint: "Only you see it; it stays on this device.",
+    calls: "Calls", call: "Call", callIncoming: "Incoming call", callCalling: "Calling…",
+    callRinging: "Ringing…", callConnecting: "Connecting…", callConnected: "Connected",
+    callEnded: "Call ended", callDeclined: "Call declined", callBusy: "Busy",
+    callNoAnswer: "No answer", callFailed: "Couldn't connect",
+    callAnsweredElsewhere: "Answered on another device",
+    answer: "Answer", decline: "Decline", end: "End", mute: "Mute", unmute: "Unmute",
+    speaker: "Speaker", callBack: "Call back", dismiss: "Close",
+    encryptedViaRelay: "Encrypted via relay", callsEmpty: "No calls yet",
+    callOutgoing: "Outgoing", callIncomingRow: "Incoming", callMissed: "Missed",
+    callFailedRow: "Failed", clear: "Clear", delete: "Delete",
+    confirmClearCalls: "Clear the call log? Click again",
   },
   ru: {
     appTitle: "КОНСТРУКТ", starting: "Открываю…",
@@ -359,6 +370,17 @@ const WORDS = {
     platform_ios: "iPhone", platform_android: "Android", platform_desktop: "Компьютер",
     platform_web: "Веб", platform_bot: "Бот", unnamedDevice: "Пока без имени",
     aliasPlaceholder: "Ваше имя для собеседника", aliasHint: "Его видите только вы, оно хранится на этом устройстве.",
+    calls: "Звонки", call: "Позвонить", callIncoming: "Входящий звонок", callCalling: "Звоним…",
+    callRinging: "Звонок…", callConnecting: "Подключение…", callConnected: "Соединено",
+    callEnded: "Звонок завершён", callDeclined: "Звонок отклонён", callBusy: "Занято",
+    callNoAnswer: "Не ответили", callFailed: "Не удалось соединиться",
+    callAnsweredElsewhere: "Отвечено на другом устройстве",
+    answer: "Ответить", decline: "Отклонить", end: "Завершить", mute: "Выкл. микрофон", unmute: "Вкл. микрофон",
+    speaker: "Динамик", callBack: "Перезвонить", dismiss: "Закрыть",
+    encryptedViaRelay: "Зашифровано через relay", callsEmpty: "Звонков пока нет",
+    callOutgoing: "Исходящий", callIncomingRow: "Входящий", callMissed: "Пропущен",
+    callFailedRow: "Не удался", clear: "Очистить", delete: "Удалить",
+    confirmClearCalls: "Очистить журнал звонков? Нажмите ещё раз",
   },
 };
 // The language chosen in settings, or the system's. A change reloads the page.
@@ -2491,8 +2513,191 @@ function onEvent(e) {
       renderChats();
       if (state.open === e.peerId) $("chat-avatar").replaceChildren(avatar(e.peerId, true));
       break;
+    case "callState": onCall(e.call); break;
+    case "callHistory": onCallHistory(e.calls); break;
   }
 }
+
+// ── Call ───────────────────────────────────────────────────────────────────
+
+state.call = null; // the CallView the page draws, or null
+state.calls = []; // the call log
+let callMuted = false;
+let callTimer = null;
+
+function fmtDuration(s) {
+  if (s >= 3600) {
+    return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  }
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function callStatusText(call, seconds) {
+  switch (call.phase) {
+    case "incoming": return t("callIncoming");
+    case "calling": return t("callCalling");
+    case "ringing": return t("callRinging");
+    case "connecting": return t("callConnecting");
+    case "live": return seconds != null ? fmtDuration(seconds) : t("callConnected");
+    case "over":
+      switch (call.outcome) {
+        case "declined": return t("callDeclined");
+        case "busy": return t("callBusy");
+        case "noAnswer": return t("callNoAnswer");
+        case "failed": return t("callFailed");
+        case "answeredElsewhere": return t("callAnsweredElsewhere");
+        default: return seconds != null ? `${t("callEnded")} · ${fmtDuration(seconds)}` : t("callEnded");
+      }
+  }
+  return "";
+}
+
+function connectedSeconds(call) {
+  if (call.connectedAtMs == null) return null;
+  return Math.max(0, Math.floor((Date.now() - call.connectedAtMs) / 1000));
+}
+
+function callButton(cls, label, action, iconPath, filled = false) {
+  const b = el("button", `call-control ${cls}`);
+  b.type = "button";
+  const knob = el("span", "knob");
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  p.setAttribute("d", iconPath);
+  if (filled) p.setAttribute("fill", "currentColor");
+  svg.append(p);
+  knob.append(svg);
+  b.append(knob, el("span", "label", label));
+  b.addEventListener("click", action);
+  return b;
+}
+
+const PHONE = "M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.2.4 2.4.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.4c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.3 0 .7-.2 1l-2.2 2.2z";
+
+function renderCall() {
+  const call = state.call;
+  if (!call) {
+    $("call-overlay").hidden = true;
+    stopCallTimer();
+    return;
+  }
+  $("call-overlay").hidden = false;
+  $("call-avatar").replaceChildren(avatar(call.peerId));
+  $("call-name").textContent = call.peerName || chatName(call.peerId);
+  $("call-status").textContent = callStatusText(call, connectedSeconds(call));
+
+  const controls = $("call-controls");
+  controls.replaceChildren();
+  if (call.phase === "incoming") {
+    controls.append(
+      callButton("decline", t("decline"), () => invoke("decline_call"), PHONE, true),
+      callButton("answer", t("answer"), () => invoke("answer_call"), PHONE, true),
+    );
+  } else if (call.phase === "over") {
+    controls.append(
+      callButton("", t("dismiss"), () => invoke("dismiss_call"), "M6 6l12 12M18 6 6 18"),
+      callButton("answer", t("callBack"), () => invoke("call", { peerId: call.peerId }), PHONE, true),
+    );
+  } else if (call.phase === "live") {
+    controls.append(
+      callButton(callMuted ? "muted" : "", callMuted ? t("unmute") : t("mute"), () => { callMuted = !callMuted; renderCall(); },
+        "M9 5a3 3 0 0 1 6 0v6a3 3 0 0 1-6 0V5zM5 11a7 7 0 0 0 13 0M12 18v3"),
+      callButton("", t("speaker"), () => {}, "M3 10v4h3l4 4V6L6 10H3zM15 9a5 5 0 0 1 0 6"),
+      callButton("end", t("end"), () => invoke("end_call"), PHONE, true),
+    );
+  }
+  if (call.phase === "live") startCallTimer(); else stopCallTimer();
+}
+
+function startCallTimer() {
+  stopCallTimer();
+  callTimer = setInterval(() => {
+    const call = state.call;
+    if (!call || call.phase !== "live") return;
+    $("call-status").textContent = fmtDuration(connectedSeconds(call));
+  }, 1000);
+}
+function stopCallTimer() {
+  if (callTimer) { clearInterval(callTimer); callTimer = null; }
+}
+
+function onCall(call) {
+  state.call = call;
+  callMuted = false;
+  renderCall();
+}
+
+// ── Call history ────────────────────────────────────────────────────────────
+
+function statusKey(status, direction) {
+  if (status === "completed") return direction === "outgoing" ? "callOutgoing" : "callIncomingRow";
+  if (status === "missed") return "callMissed";
+  if (status === "declined") return "callDeclined";
+  return "callFailedRow";
+}
+
+function callRowIcon(direction) {
+  return direction === "outgoing" ? "M15 6l6 6-6 6M21 12H8" : "M9 6l-6 6 6 6M3 12h13";
+}
+
+function renderCalls() {
+  const list = $("calls-list");
+  list.replaceChildren();
+  const empty = state.calls.length === 0;
+  $("calls-empty").hidden = !empty;
+  $("calls-clear").hidden = empty;
+  if (empty) return;
+  for (const row of state.calls) {
+    const li = el("li");
+    const dir = el("span", "dir");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    p.setAttribute("d", callRowIcon(row.direction));
+    svg.append(p);
+    dir.append(svg);
+
+    const who = el("div", `who${row.status === "missed" ? " missed" : ""}`);
+    who.append(el("div", "name", row.peerName), el("div", "sub", t(statusKey(row.status, row.direction))));
+
+    const when = el("div", "when");
+    when.append(el("div", "", rowTime(row.startedAtMs)));
+    if (row.durationSeconds > 0) when.append(el("div", "dur", fmtDuration(row.durationSeconds)));
+
+    const back = el("button", "act");
+    back.type = "button";
+    back.title = t("callBack");
+    const bsvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    bsvg.setAttribute("viewBox", "0 0 24 24");
+    const bp = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    bp.setAttribute("d", PHONE);
+    bp.setAttribute("fill", "currentColor");
+    bsvg.append(bp);
+    back.append(bsvg);
+    back.addEventListener("click", () => { $("dlg-calls").close(); invoke("call", { peerId: row.peerId }); });
+
+    const del = el("button", "act");
+    del.type = "button";
+    del.title = t("delete");
+    del.textContent = "✕";
+    del.addEventListener("click", () => invoke("delete_call", { id: row.id }));
+
+    li.append(dir, who, when, back, del);
+    list.append(li);
+  }
+}
+
+function onCallHistory(rows) {
+  state.calls = rows;
+  renderCalls();
+}
+
+$("open-calls").addEventListener("click", () => { $("dlg-calls").showModal(); invoke("call_history"); });
+$("calls-clear").addEventListener("click", (ev) => {
+  confirmTwice(ev.currentTarget, "confirmClearCalls", () => invoke("clear_calls"));
+});
+$("chat-call").addEventListener("click", () => { if (state.open) invoke("call", { peerId: state.open }); });
 
 async function start() {
   applyTheme(store.get("theme") ?? "dark");
