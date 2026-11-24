@@ -82,6 +82,14 @@ const WORDS = {
     lockEnable: "Turn on", lockChange: "Change code", lockNow: "Lock now", lockOff: "Turn off",
     lockMismatch: "The two codes differ", lockShort: "A code has at least 4 characters", lockNeedCurrent: "Enter the current code",
     lockScreenHint: "It locks the window, not the data on disk. Forgetting the code means signing out.",
+    launchTitle: "Passphrase at start", launchStatusOff: "Off: this computer's key store opens the data",
+    launchStatusOn: "On: asked for at each start", launchStatusAlways: "Always on: this computer has no key store, the passphrase is the key",
+    launchStatusUnavailable: "Not available: the key is kept in a file",
+    launchCurrent: "Current passphrase", launchNew: "New passphrase (at least 8 characters)", launchRepeat: "New passphrase again",
+    launchEnable: "Turn on", launchChange: "Change passphrase", launchOff: "Turn off",
+    launchMismatch: "The two passphrases differ", launchShort: "A passphrase has at least 8 characters", launchNeedCurrent: "Enter the current passphrase",
+    launchHint: "Without it, the data copied from this computer does not open, even together with the key store. It does not protect against a program that watches Konstruct while it is open, and it does not help if the data was already copied. A forgotten passphrase cannot be recovered: the history on this device is lost.",
+    launchForgot: "Forgot the passphrase? Erase this device",
     minutesShort: "min", issuedInvites: "Issued invites", noInvites: "No invite can be redeemed now.",
     inviteKind_qr: "QR code and link", inviteKind_link: "Link", inviteLeft: "{time} left",
     revokeInvite: "Revoke", revokeAllInvites: "Revoke all", confirmRevokeInvite: "Revoke? Click again",
@@ -267,6 +275,14 @@ const WORDS = {
     lockEnable: "Включить", lockChange: "Сменить код", lockNow: "Заблокировать сейчас", lockOff: "Выключить",
     lockMismatch: "Коды не совпадают", lockShort: "Код — не меньше 4 символов", lockNeedCurrent: "Введите текущий код",
     lockScreenHint: "Закрывается окно, а не данные на диске. Забытый код — это выход из аккаунта.",
+    launchTitle: "Пароль при запуске", launchStatusOff: "Выключен: данные открывает хранилище ключей этого компьютера",
+    launchStatusOn: "Включён: спрашивается при каждом запуске", launchStatusAlways: "Всегда включён: на этом компьютере нет хранилища ключей, пароль и есть ключ",
+    launchStatusUnavailable: "Недоступен: ключ лежит в файле",
+    launchCurrent: "Текущий пароль", launchNew: "Новый пароль (не меньше 8 символов)", launchRepeat: "Новый пароль ещё раз",
+    launchEnable: "Включить", launchChange: "Сменить пароль", launchOff: "Выключить",
+    launchMismatch: "Пароли не совпадают", launchShort: "Пароль — не меньше 8 символов", launchNeedCurrent: "Введите текущий пароль",
+    launchHint: "Без него данные, скопированные с этого компьютера, не откроются даже вместе с хранилищем ключей. От программы, которая следит за открытым Konstruct, он не защищает и не поможет, если данные уже скопировали. Забытый пароль не восстановить: история на этом устройстве пропадёт.",
+    launchForgot: "Забыли пароль? Стереть устройство",
     minutesShort: "мин", issuedInvites: "Выданные приглашения", noInvites: "Сейчас ни одним приглашением нельзя воспользоваться.",
     inviteKind_qr: "QR-код и ссылка", inviteKind_link: "Ссылка", inviteLeft: "осталось {time}",
     revokeInvite: "Отозвать", revokeAllInvites: "Отозвать все", confirmRevokeInvite: "Отозвать? Нажмите ещё раз",
@@ -516,6 +532,7 @@ const state = {
   invite: null,
   settings: null, // the account's settings as the client last sent them
   lock: { enabled: false, delaySecs: 0, locked: false },
+  launch: "unavailable", // the launch passphrase: off, on, always or unavailable
   connected: false,
   avatars: new Map(), // peerId → data URI of the picture their profile carried
   link: null,
@@ -530,6 +547,7 @@ function showScreen(screen) {
   if (screen === "unlock" || screen === "setPassphrase") {
     $("passphrase-hint").textContent = t(screen === "unlock" ? "unlockHint" : "setPassphraseHint");
     $("passphrase-submit").textContent = t(screen === "unlock" ? "unlock" : "setPassphrase");
+    $("passphrase-forgot").hidden = screen !== "unlock";
     $("passphrase").autocomplete = screen === "unlock" ? "current-password" : "new-password";
     $("passphrase").value = "";
     $("passphrase").focus();
@@ -1411,6 +1429,7 @@ function openSettings(pane = "profile") {
   markPrefs();
   renderAccountSettings();
   renderLock();
+  renderLaunch();
   invoke("load_settings");
   showPane(pane);
   $("dlg-settings").showModal();
@@ -2038,6 +2057,38 @@ $("lock-off").addEventListener("click", () => {
 });
 $("lock-now").addEventListener("click", () => invoke("lock_now"));
 
+// ── The launch passphrase ───────────────────────────────────────────────────
+
+function renderLaunch() {
+  const on = state.launch === "on";
+  const status = { off: "launchStatusOff", on: "launchStatusOn", always: "launchStatusAlways" };
+  $("launch-status").textContent = t(status[state.launch] ?? "launchStatusUnavailable");
+  $("launch-form").hidden = !on && state.launch !== "off";
+  $("launch-current").hidden = !on;
+  $("launch-save").textContent = t(on ? "launchChange" : "launchEnable");
+  $("launch-off").hidden = !on;
+}
+function clearLaunchFields() {
+  for (const id of ["launch-current", "launch-new", "launch-repeat"]) $(id).value = "";
+}
+$("launch-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const on = state.launch === "on";
+  const current = $("launch-current").value;
+  const passphrase = $("launch-new").value;
+  if (on && !current) return toast(t("launchNeedCurrent"), true);
+  if ([...passphrase].length < 8) return toast(t("launchShort"), true);
+  if (passphrase !== $("launch-repeat").value) return toast(t("launchMismatch"), true);
+  invoke("set_launch_passphrase", { current: on ? current : null, new: passphrase });
+  clearLaunchFields();
+});
+$("launch-off").addEventListener("click", () => {
+  const current = $("launch-current").value;
+  if (!current) return toast(t("launchNeedCurrent"), true);
+  invoke("set_launch_passphrase", { current, new: null });
+  clearLaunchFields();
+});
+
 // ── Issued invites ──────────────────────────────────────────────────────────
 
 function renderInvites() {
@@ -2368,6 +2419,8 @@ $("passphrase-form").addEventListener("submit", (ev) => {
   invoke(state.screen === "unlock" ? "unlock" : "set_passphrase", { passphrase });
   $("passphrase").value = "";
 });
+$("passphrase-forgot").addEventListener("click", (ev) =>
+  confirmTwice(ev.currentTarget, "confirmLockForgot", () => invoke("logout")));
 $("chat-search").addEventListener("input", (ev) => {
   state.filter = ev.target.value;
   renderChats();
@@ -2449,6 +2502,10 @@ function onEvent(e) {
       state.lock.enabled = e.enabled;
       state.lock.delaySecs = e.delaySecs;
       renderLock();
+      break;
+    case "launchPassphrase":
+      state.launch = e.state;
+      renderLaunch();
       break;
     case "locked": onLocked(); break;
     case "unlocked": onUnlocked(); break;

@@ -252,6 +252,10 @@ pub enum ViewEvent {
         enabled: bool,
         delay_secs: u32,
     },
+    /// How the data stands with a launch passphrase: `off`, `on`, `always` or `unavailable`.
+    LaunchPassphrase {
+        state: &'static str,
+    },
     /// The server did not delete the account; nothing was wiped.
     DeleteFailed {
         reason: String,
@@ -612,6 +616,10 @@ pub enum Intent {
     CancelHistoryNearby,
     RevokeInvites(Vec<String>),
     UnlockApp(Zeroizing<String>),
+    SetLaunchPassphrase {
+        current: Option<Zeroizing<Vec<u8>>>,
+        new: Option<Zeroizing<Vec<u8>>>,
+    },
     SetAppLock {
         current: Option<Zeroizing<String>>,
         code: Option<Zeroizing<String>>,
@@ -676,6 +684,7 @@ struct Model {
     /// People's pictures as data URIs, for a reloaded page.
     avatars: std::collections::HashMap<String, String>,
     lock: Lock,
+    launch: Option<construct_client::LaunchPassphrase>,
     /// The copy of a history file the client is reading.
     importing: Option<std::path::PathBuf>,
     /// A transfer over the local network under way: whether this device sends.
@@ -729,6 +738,7 @@ impl Lock {
                 | ViewEvent::Unlocked
                 | ViewEvent::UnlockFailed { .. }
                 | ViewEvent::LockSetting { .. }
+                | ViewEvent::LaunchPassphrase { .. }
                 | ViewEvent::Update { .. }
         )
     }
@@ -892,6 +902,7 @@ pub async fn run(
         focused: true,
         avatars: Default::default(),
         lock: Lock::default(),
+        launch: None,
         importing: None,
         nearby: None,
         update: None,
@@ -1017,6 +1028,9 @@ fn handle_intent(
         }
         Intent::Unlock(passphrase) => client.send(ClientCommand::Unlock(passphrase)),
         Intent::SetPassphrase(passphrase) => client.send(ClientCommand::SetPassphrase(passphrase)),
+        Intent::SetLaunchPassphrase { current, new } => {
+            client.send(ClientCommand::SetLaunchPassphrase { current, new })
+        }
         Intent::OpenChat(peer_id) => {
             model.chat_mut(&peer_id).unread = 0;
             model.open_chat = Some(peer_id.clone());
@@ -1240,6 +1254,18 @@ fn handle_intent(
     }
 }
 
+fn launch_passphrase(state: construct_client::LaunchPassphrase) -> ViewEvent {
+    use construct_client::LaunchPassphrase::*;
+    ViewEvent::LaunchPassphrase {
+        state: match state {
+            Off => "off",
+            On => "on",
+            Always => "always",
+            Unavailable => "unavailable",
+        },
+    }
+}
+
 fn snapshot(model: &Model) -> Vec<ViewEvent> {
     let mut events = vec![ViewEvent::Screen {
         screen: model.screen,
@@ -1251,6 +1277,7 @@ fn snapshot(model: &Model) -> Vec<ViewEvent> {
         });
     }
     // Nothing of the account: shown while locked too.
+    events.extend(model.launch.map(launch_passphrase));
     events.extend(model.update.clone());
     if model.lock.locked {
         events.push(ViewEvent::Connection {
@@ -1335,6 +1362,7 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
             out
         }
         ClientEvent::NeedsPassphrase => vec![screen(model, Screen::SetPassphrase)],
+        ClientEvent::NeedsUnlock => vec![screen(model, Screen::Unlock)],
         ClientEvent::AuthFailed { reason, no_session } => {
             let mut out = vec![screen(model, Screen::Onboarding)];
             if !no_session {
@@ -1517,6 +1545,7 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
         }],
         ClientEvent::LoggedOut => {
             model.lock = Lock::default();
+            model.launch = None;
             model.chats.clear();
             model.open_chat = None;
             model.account = None;
@@ -1588,6 +1617,11 @@ fn on_client_event(event: ClientEvent, model: &mut Model, server: &str) -> Vec<V
         }
         ClientEvent::AppUnlocked(Err(reason)) => vec![ViewEvent::UnlockFailed { reason }],
         ClientEvent::AppLockRefused(reason) => vec![notice(reason, true)],
+        ClientEvent::LaunchPassphrase(state) => {
+            model.launch = Some(state);
+            vec![launch_passphrase(state)]
+        }
+        ClientEvent::LaunchPassphraseRefused(reason) => vec![notice(reason, true)],
         ClientEvent::HistoryExported(result) => vec![match result {
             Ok((s, path)) => ViewEvent::HistoryTransfer {
                 exported: true,
@@ -2199,6 +2233,7 @@ mod tests {
             focused: true,
             avatars: Default::default(),
             lock: Lock::default(),
+            launch: None,
             importing: None,
             nearby: None,
             update: None,
@@ -2251,6 +2286,41 @@ mod tests {
             json.contains("secret plans"),
             "unlocked, the page is drawn again"
         );
+    }
+
+    #[test]
+    fn a_sealed_store_asks_for_its_passphrase_and_a_reload_asks_again() {
+        let mut model = model();
+        model.screen = Screen::Starting;
+        let outs = on_client_event(ClientEvent::NeedsUnlock, &mut model, "");
+        let json = serde_json::to_string(&outs).unwrap();
+        assert!(json.contains("\"unlock\""), "{json}");
+        let reload = serde_json::to_string(&snapshot(&model)).unwrap();
+        assert!(reload.contains("\"unlock\""), "{reload}");
+    }
+
+    #[test]
+    fn the_launch_passphrase_setting_is_redrawn_and_gone_after_logout() {
+        use construct_client::LaunchPassphrase;
+        let mut model = model();
+        let shown = |events: &[ViewEvent]| {
+            events.iter().find_map(|e| match e {
+                ViewEvent::LaunchPassphrase { state } => Some(*state),
+                _ => None,
+            })
+        };
+        for (state, name) in [
+            (LaunchPassphrase::Off, "off"),
+            (LaunchPassphrase::On, "on"),
+            (LaunchPassphrase::Always, "always"),
+            (LaunchPassphrase::Unavailable, "unavailable"),
+        ] {
+            let outs = on_client_event(ClientEvent::LaunchPassphrase(state), &mut model, "");
+            assert_eq!(shown(&outs), Some(name));
+            assert_eq!(shown(&snapshot(&model)), Some(name));
+        }
+        on_client_event(ClientEvent::LoggedOut, &mut model, "");
+        assert_eq!(shown(&snapshot(&model)), None);
     }
 
     #[test]

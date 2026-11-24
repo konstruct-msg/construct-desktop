@@ -388,6 +388,17 @@ fn set_app_lock(
     });
 }
 
+/// Set, change or remove the passphrase asked for at each start; the client checks the current
+/// one.
+#[tauri::command]
+fn set_launch_passphrase(current: Option<String>, new: Option<String>, intents: State<Intents>) {
+    let bytes = |p: String| Zeroizing::new(p.into_bytes());
+    intents.send(Intent::SetLaunchPassphrase {
+        current: current.map(bytes),
+        new: new.map(bytes),
+    });
+}
+
 /// Burn invites this device handed out.
 #[tauri::command]
 fn revoke_invites(jtis: Vec<String>, intents: State<Intents>) {
@@ -804,6 +815,7 @@ fn main() {
             cancel_history_nearby,
             unlock_app,
             set_app_lock,
+            set_launch_passphrase,
             revoke_invites,
             cancel_link_offer,
             approve_device,
