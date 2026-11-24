@@ -78,6 +78,7 @@
       <p id="passphrase-hint" class="dim"></p>
       <input id="passphrase" type="password" class="field" autocomplete="current-password">
       <button type="submit" class="primary" id="passphrase-submit"></button>
+      <button type="button" class="danger-link" id="passphrase-forgot" data-t="launchForgot" hidden></button>
       <button type="button" class="link small dim save-logs" data-t="saveLogs"></button>
     </form>
   </section>
@@ -412,6 +413,18 @@
           </div>
         </form>
         <p class="small dim" data-t="lockScreenHint"></p>
+        <h3 class="section" data-t="launchTitle"></h3>
+        <p class="small" id="launch-status"></p>
+        <form class="column-form" id="launch-form">
+          <input type="password" class="field" id="launch-current" autocomplete="off" data-tp="launchCurrent">
+          <input type="password" class="field" id="launch-new" autocomplete="off" data-tp="launchNew">
+          <input type="password" class="field" id="launch-repeat" autocomplete="off" data-tp="launchRepeat">
+          <div class="row">
+            <button type="submit" class="secondary" id="launch-save"></button>
+            <button type="button" class="danger-link" id="launch-off" data-t="launchOff"></button>
+          </div>
+        </form>
+        <p class="small dim" data-t="launchHint"></p>
         <h3 class="section" data-t="issuedInvites"></h3>
         <ul class="devices" id="set-invites"></ul>
         <div class="row"><button type="button" class="secondary" id="revoke-invites" data-t="revokeAllInvites"></button></div>
